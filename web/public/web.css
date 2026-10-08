@@ -3,9 +3,6 @@
  * aviso de conexão e o layout de celular/tablet. Nada aqui afeta o app desktop.
  */
 
-/* Na web, importar backup é só do Admin: o bloco de importação some pra quem não é Admin. */
-body:has(#perfil-label:not(.admin)) #tab-backup .backup-bloco:has(#btn-backup-importar) { display: none; }
-
 /* Altura correta no celular (100vh conta a barra de endereço que some/aparece). */
 #app { height: 100dvh; }
 

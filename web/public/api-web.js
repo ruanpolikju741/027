@@ -212,10 +212,13 @@
   }
 
   async function importarBackup(senha, modo) {
-    // Na web, importar é só do Admin (o servidor também confere) — avisa antes de abrir o seletor.
+    // "Mesclar" é só do Admin (o servidor também confere) — avisa antes de abrir o seletor.
     const rotuloPerfil = document.getElementById('perfil-label');
-    if (!rotuloPerfil || !rotuloPerfil.classList.contains('admin')) {
-      return { ok: false, erro: 'Na versão web, só o Admin pode importar um backup. Peça ao Admin.' };
+    if (modo === 'mesclar' && !(rotuloPerfil && rotuloPerfil.classList.contains('admin'))) {
+      return {
+        ok: false,
+        erro: 'Somente o admin pode importar mesclando com os dados atuais. O perfil Default só pode importar substituindo tudo.',
+      };
     }
     if (!senha) return { ok: false, erro: 'Informe a senha usada ao exportar o backup.' };
     const arquivo = await escolherArquivo('.estoquebkp,.json');
@@ -226,7 +229,7 @@
     } catch (e) {
       return { ok: false, erro: 'Não foi possível ler o arquivo selecionado.' };
     }
-    // `?grande=1`: o servidor libera um envio maior (o backup pode ter muitas fotos), só pro Admin.
+    // `?grande=1`: o servidor libera um envio maior (o backup pode ter muitas fotos).
     return chamarServidor('/api/rpc?grande=1', 'backup:importar', [{ senha, modo, conteudo }]);
   }
 

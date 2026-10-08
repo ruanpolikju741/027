@@ -71,8 +71,6 @@ function ehAdmin(sessao) {
  *   se a tela de "criar login de Admin" deve aparecer (padrão: igual a `podeConfigurarAdmin`)
  * @param {(pacote: object) => Promise<object>} [plataforma.prepararPacoteExportacao]
  *   ajuste final do pacote de backup antes de criptografar (a web embute as fotos de volta)
- * @param {boolean} [plataforma.importacaoSomenteAdmin]  importar backup só pelo Admin (web)
- * @param {boolean} [plataforma.exportacaoDoDefaultSemContas]  backup do Default sem as contas de login (web)
  */
 function criarHandlers(plataforma) {
   const carregar = async () => plataforma.carregar();
@@ -484,10 +482,6 @@ function criarHandlers(plataforma) {
     }
     try {
       let pacote = logic.montarPacoteExportacao(await carregar());
-      // Na web, o backup exportado pelo Default sai SEM as contas de login: o arquivo é cifrado com
-      // uma senha que ele mesmo escolhe, então levaria os hashes das senhas de todo mundo pra
-      // quebrar com calma fora do app. (No desktop, quem exporta já tem o arquivo local nas mãos.)
-      if (plataforma.exportacaoDoDefaultSemContas && !ehAdmin(sessao)) pacote = { ...pacote, contasLogin: [] };
       if (plataforma.prepararPacoteExportacao) pacote = await plataforma.prepararPacoteExportacao(pacote);
       const salt = cryptoUtils.gerarSalt();
       const chave = cryptoUtils.derivarChaveDeSenha(senha, salt);
@@ -510,16 +504,6 @@ function criarHandlers(plataforma) {
 
   h['backup:importar'] = async (sessao, { senha, modo, conteudo } = {}) => {
     // "Mesclar" é exclusivo do Admin; o Default só pode substituir tudo ou exportar.
-    // Na web, importar é só do Admin: "substituir tudo" troca TODAS as contas de login pelas do
-    // arquivo (que quem importa monta como quiser) e zera o Admin — nas mãos de um Default, num app
-    // aberto na internet, isso seria apagar os dados de todo mundo e se dar acesso.
-    if (plataforma.importacaoSomenteAdmin && !ehAdmin(sessao)) {
-      return {
-        ok: false,
-        erro: 'Na versão web, só o Admin pode importar um backup (pra ninguém conseguir apagar os dados de todos). ' +
-          'Peça ao Admin.',
-      };
-    }
     if (modo === 'mesclar' && !ehAdmin(sessao)) {
       return {
         ok: false,

@@ -306,32 +306,50 @@ const PNG_1x1 =
     assert.strictEqual((await outro.rpc('items:list')).sessaoExpirada, true);
   });
 
-  await t('na web o Default NÃO importa backup e exporta SEM as contas de login (hashes de senha)', async () => {
+  await t('Default: exporta backup completo (como no desktop) e não pode importar "mesclando"', async () => {
     const def = criarCliente(srv.base);
     await admin.rpc('contasLogin:criar', { usuario: 'carlos', senha: 'temp123' });
     const lg = await def.rpc('auth:login', { usuario: 'carlos', senha: 'temp123' });
     await def.rpc('auth:trocarSenhaPrimeiroAcesso', { contaId: lg.contaId, senhaAtual: 'temp123', novaSenha: 'carlos123' });
-    const imp = await def.rpc('backup:importar', { senha: 'backup123', modo: 'total', conteudo: backupConteudo });
-    assert.strictEqual(imp.ok, false);
-    assert.match(imp.erro, /só o Admin/);
-    const grande = await fetch(srv.base + '/api/rpc?grande=1', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'estoque-web', Cookie: def.cookie },
-      body: JSON.stringify({ canal: 'backup:importar', args: [{ senha: 'x', modo: 'total', conteudo: 'x' }] }),
-    });
-    assert.match((await grande.json()).r.erro, /só o Admin/);
+    const mesclar = await def.rpc('backup:importar', { senha: 'backup123', modo: 'mesclar', conteudo: backupConteudo });
+    assert.strictEqual(mesclar.ok, false);
+    assert.match(mesclar.erro, /admin/i);
 
     const exp = await def.rpc('backup:exportar', { senha: 'carlos-bkp' });
     assert.strictEqual(exp.ok, true);
-    assert.strictEqual(exp.totalContasLogin, 0);
-    const cu = require('../src/crypto-utils');
-    const arq = JSON.parse(exp.conteudo);
-    const pacote = cu.descriptografarJSON(arq.payload, cu.derivarChaveDeSenha('carlos-bkp', arq.salt));
-    assert.deepStrictEqual(pacote.contasLogin, []);
-    assert.ok(!exp.conteudo.includes('hashSenha'));
+    assert.ok(exp.totalContasLogin >= 1);
     // E um argumento nulo não derruba nada (vira erro normal de validação).
     const nulo = await def.rpc('usuarios:editar', null);
     assert.strictEqual(nulo.ok, false);
+  });
+
+  await t('Default importa "substituir tudo" pelo envio grande (?grande=1): volta pro login, só valem as contas do arquivo', async () => {
+    const pastaX = pastaTemp();
+    const sx = await subir({ armazenamento: criarArmazenamentoArquivo({ pasta: pastaX }), chaveDados });
+    const adm = criarCliente(sx.base);
+    await adm.rpc('auth:configurarLoginInicial', { usuario: 'chefe', senha: 'chefe123' });
+    await adm.rpc('contasLogin:criar', { usuario: 'ezio', senha: 'ezio123' });
+    const def = criarCliente(sx.base);
+    const lg = await def.rpc('auth:login', { usuario: 'ezio', senha: 'ezio123' });
+    await def.rpc('auth:trocarSenhaPrimeiroAcesso', { contaId: lg.contaId, senhaAtual: 'ezio123', novaSenha: 'ezio456' });
+
+    const resp = await fetch(sx.base + '/api/rpc?grande=1', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'estoque-web', Cookie: def.cookie },
+      body: JSON.stringify({ canal: 'backup:importar', args: [{ senha: 'backup123', modo: 'total', conteudo: backupConteudo }] }),
+    });
+    const imp = (await resp.json()).r;
+    assert.strictEqual(imp.ok, true);
+    assert.strictEqual(imp.perfil, null);
+    assert.strictEqual((await adm.rpc('items:list')).sessaoExpirada, true); // Admin antigo caiu
+    const novo = criarCliente(sx.base);
+    assert.strictEqual((await novo.rpc('auth:login', { usuario: 'chefe', senha: 'chefe123' })).ok, false);
+    const itens = await (async () => {
+      const lgJ = await novo.rpc('auth:login', { usuario: 'joana', senha: 'temp123' }); // conta que veio no arquivo
+      return lgJ;
+    })();
+    assert.strictEqual(itens.ok, false); // joana foi criada depois desse backup — não vem
+    await sx.fechar();
   });
 
   await t('cookie de sessão adulterado não vale nada', async () => {

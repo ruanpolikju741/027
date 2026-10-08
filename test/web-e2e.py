@@ -160,16 +160,8 @@ def main():
 
             pg.click('.tab-btn[data-tab="backup"]')
             expect(pg.locator('#btn-backup-exportar')).to_be_visible()
-            expect(pg.locator('#btn-backup-importar')).to_be_hidden()
-            passo('Default na web: pode exportar, mas não vê a importação de backup')
-
-            pg.click('#btn-sair')
-            pg.click('#confirm-ok')
-            pg.fill('#login-usuario', 'dono')
-            pg.fill('#login-senha', 'senhaForte1')
-            pg.click('#login-confirmar-btn')
-            expect(pg.locator('#perfil-label')).to_contain_text('Admin')
-            pg.click('.tab-btn[data-tab="backup"]')
+            expect(pg.locator('#btn-backup-importar')).to_be_visible()
+            expect(pg.locator('input[name="modo-importar"][value="mesclar"]')).to_be_hidden()
             pg.fill('#backup-importar-senha', 'backup123')
             pg.click('#btn-backup-importar')
             with pg.expect_file_chooser() as fc:
@@ -180,7 +172,7 @@ def main():
             pg.fill('#login-senha', 'senhaForte1')
             pg.click('#login-confirmar-btn')
             expect(pg.locator('#login-erro')).to_be_visible()
-            passo('importação total pelo Admin: volta pro login e o Admin antigo não entra mais')
+            passo('importação total pelo Default: volta pro login e o Admin antigo não entra mais')
 
             # Sessão que perdeu a validade no meio do uso → volta pro login sozinha.
             pg.fill('#login-usuario', 'joana')

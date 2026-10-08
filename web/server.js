@@ -32,7 +32,7 @@ const ATRAS_DE_PROXY = !!(process.env.RENDER || process.env.ATRAS_DE_PROXY);
 
 const LIMITE_CORPO_ANONIMO = 64 * 1024; // antes do login: só telas de login
 const LIMITE_CORPO_LOGADO = 15 * 1024 * 1024; // depois: fotos/vídeos
-const LIMITE_CORPO_BACKUP = 80 * 1024 * 1024; // importação de backup (só Admin, uma de cada vez)
+const LIMITE_CORPO_BACKUP = 80 * 1024 * 1024; // importação de backup (uma de cada vez)
 // Teto de bytes sendo recebidos ao mesmo tempo por quem está LOGADO (o plano grátis tem 512 MB de
 // memória, e cada requisição grande é copiada algumas vezes até virar dado), também por endereço
 // de internet — e um teto de envios simultâneos de quem ainda não logou, por endereço.
@@ -305,8 +305,6 @@ function criarServidor(config) {
     lerBackup: async ({ conteudo }) =>
       typeof conteudo === 'string' && conteudo ? { ok: true, conteudo } : { ok: false, cancelado: true },
     prepararPacoteExportacao: (pacote) => repo.embutirMidias(pacote),
-    importacaoSomenteAdmin: true,
-    exportacaoDoDefaultSemContas: true,
     // A tela de criar o Admin aparece numa instalação nova, ou (pra recriar depois de uma
     // importação total) quando o dono abre o link com o token secreto do servidor.
     mostrarTelaConfigurarAdmin: (data, { tokenConfiguracao }) =>
@@ -398,9 +396,9 @@ function criarServidor(config) {
     }
 
     const { sessao, meta } = lerSessao(req);
-    // Requisição grande (importar backup) só pra Admin logado, uma de cada vez.
+    // Requisição grande (importar backup): só pra quem está logado, uma de cada vez.
     const ehBackup = new URL(req.url, 'http://x').searchParams.get('grande') === '1';
-    if (ehBackup && (sessao.perfil !== 'admin' || backupEmAndamento)) {
+    if (ehBackup && (!sessao.perfil || backupEmAndamento)) {
       res.setHeader('Connection', 'close');
       res.on('finish', () => req.destroy());
       return responderJson(res, 200, {
@@ -408,8 +406,8 @@ function criarServidor(config) {
           ok: false,
           erro: backupEmAndamento
             ? 'Já existe uma importação de backup em andamento — aguarde ela terminar.'
-            : 'Na versão web, só o Admin pode importar um backup (pra ninguém conseguir apagar os dados de todos). ' +
-              'Peça ao Admin.',
+            : 'Sua sessão expirou — entre novamente.',
+          sessaoExpirada: !backupEmAndamento,
         },
       });
     }

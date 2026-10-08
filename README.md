@@ -153,13 +153,12 @@ abrem de baixo pra cima.
   bloquear a aba, permita pop-ups para o endereço do app.
 - **Backup**: exportar **baixa** o arquivo `.estoquebkp`; importar abre o
   seletor de arquivos do aparelho. O arquivo é o mesmo do desktop.
-- **Na web, só o Admin importa backup** (no desktop o Default também pode
-  "substituir tudo"). Motivo: "substituir tudo" troca todas as contas de
-  login pelas do arquivo e zera o Admin — num app aberto na internet, uma
-  conta Default poderia montar um arquivo, apagar os dados de todos e se dar
-  acesso. Pelo mesmo motivo, o backup **exportado por um Default na web sai
-  sem as contas de login** (que levam os hashes das senhas de todo mundo); o
-  do Admin sai completo. Se preferir a regra antiga também na web, é só pedir.
+- **Mesmas regras de backup do desktop**: o Default exporta e importa
+  ("substituir tudo"); "mesclar" é só do Admin. Depois de um "substituir
+  tudo", o Admin desta instalação é zerado como no desktop — na web, o dono
+  recria pelo link com o token (passo 5). Atenção: quem tem uma conta Default
+  consegue, com isso, trocar todos os dados e contas pelos de um arquivo;
+  dê contas Default só a pessoas de confiança e faça backups com frequência.
 - **Vários aparelhos ao mesmo tempo**: cada navegador tem sua própria sessão
   de login. As gravações entram em fila (nunca uma sobrescreve a outra). Se
   o Admin trocar/resetar a senha de alguém, excluir uma conta ou importar um
@@ -341,8 +340,7 @@ A tabela mostra, pra cada conta, se ela ainda está com senha temporária
   exclusivo do Admin) um backup do catálogo/usuários/histórico/contas de
   login (aba "Backup") — o login do próprio Admin nunca entra nem sai desse
   arquivo, mas **importar substituindo tudo zera o login do Admin desta
-  máquina** (ver seção "Backup" abaixo). *Na versão web, importar é só do
-  Admin — ver "Versão web".* Depois de importar, o app volta pra
+  máquina** (ver seção "Backup" abaixo). Depois de importar, o app volta pra
   tela de login normal — e, sem nenhum Admin configurado, só as contas de
   login trazidas pelo arquivo conseguem entrar.
 - Gerar o **PDF de pedidos** (aba "Histórico") — ver "Relatório de pedidos em
@@ -864,7 +862,7 @@ Na aba **"Backup"**:
   símbolos, com no mínimo 6 caracteres**; essa senha é pedida de volta para
   importar. É esse arquivo que você usa para guardar uma cópia de segurança
   ou migrar os dados para outro computador.
-- **Importar** (Default e Admin no desktop; **só o Admin na versão web**): escolhe um arquivo `.estoquebkp` exportado
+- **Importar** (Default e Admin): escolhe um arquivo `.estoquebkp` exportado
   antes, a senha usada na exportação e um dos dois modos abaixo — mas
   **"Mesclar" é exclusivo do Admin**: o Default só pode escolher
   "Substituir tudo" (o botão de mesclar nem aparece pra ele). O arquivo de
@@ -1056,12 +1054,12 @@ Além deles:
 - `test/desktop-smoke.js` carrega o `main.js` de verdade com um Electron "de
   mentira" e percorre 50 ações da interface na ordem em que a tela as faz
   (login, catálogo, PDFs, backup, conta do Default, desfazer, importação…).
-- `test/web-tests.js` sobe o servidor web e testa 24 cenários: proteção
+- `test/web-tests.js` sobe o servidor web e testa 25 cenários: proteção
   CSRF, limites de tamanho, fotos (gravadas à parte, criptografadas,
   servidas só pra quem está logado, SVG/links recusados), sessões
   (sobrevivem ao servidor reiniciar, caem quando a senha muda, cookie
-  adulterado não vale), bloqueio por senha errada, importação só pelo Admin
-  e exportação do Default sem as contas, o link com token do
+  adulterado não vale), bloqueio por senha errada, importação pelo Default
+  (só "substituir tudo") pelo envio grande, o link com token do
   Admin, a recusa de subir com a `CHAVE_DADOS` errada, e o armazenamento no
   Supabase contra um Supabase falso local.
 - `test/web-e2e.py` abre a versão web num **navegador de verdade**
