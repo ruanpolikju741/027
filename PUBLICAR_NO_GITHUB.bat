@@ -43,6 +43,16 @@ git config user.name "%NOME_GIT%"
 git config user.email "%EMAIL_GIT%"
 
 :enviar
+REM Se o GitHub ja tem historico (ex.: a pasta foi extraida de novo, sem o .git antigo),
+REM encaixa esta pasta em cima dele em vez de brigar com ele. Nao apaga nada do GitHub:
+REM so registra os arquivos desta pasta como a versao mais nova.
+git fetch origin >nul 2>nul
+git rev-parse --verify --quiet origin/main >nul 2>nul
+if errorlevel 1 goto :commit
+git merge-base --is-ancestor origin/main HEAD >nul 2>nul
+if not errorlevel 1 goto :commit
+git reset --soft origin/main
+:commit
 git add -A
 git commit -m "Atualiza o Controle de Estoque" >nul 2>nul
 git push -u origin main
