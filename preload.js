@@ -7,6 +7,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('api', {
   auth: {
     getPerfil: () => ipcRenderer.invoke('auth:getPerfil'),
+    quemSou: () => ipcRenderer.invoke('auth:quemSou'),
     precisaConfigurarLogin: () => ipcRenderer.invoke('auth:precisaConfigurarLogin'),
     configurarLoginInicial: (usuario, senha) =>
       ipcRenderer.invoke('auth:configurarLoginInicial', { usuario, senha }),
@@ -21,7 +22,8 @@ contextBridge.exposeInMainWorld('api', {
   },
   contasLogin: {
     listar: () => ipcRenderer.invoke('contasLogin:listar'),
-    criar: (usuario, senha) => ipcRenderer.invoke('contasLogin:criar', { usuario, senha }),
+    criar: (usuario, senha, admin) => ipcRenderer.invoke('contasLogin:criar', { usuario, senha, admin }),
+    definirAdmin: (contaId, admin) => ipcRenderer.invoke('contasLogin:definirAdmin', { contaId, admin }),
     excluir: (contaId) => ipcRenderer.invoke('contasLogin:excluir', contaId),
     resetarSenha: (contaId, novaSenha) => ipcRenderer.invoke('contasLogin:resetarSenha', { contaId, novaSenha }),
   },

@@ -3,6 +3,7 @@
 const state = {
   perfil: null, // null (ainda não logou) | 'default' | 'admin'
   usuarioLogado: null, // usuário (texto) da conta autenticada nesta sessão — só pra exibir na tela
+  usuarioAdmin: null, // conta com acesso de Admin que está no modo Admin agora (null = Admin principal)
   items: [],
   usuarios: [],
   busca: '',
@@ -257,8 +258,16 @@ async function init() {
  * `init` depois do login), roda de novo depois de um logout/troca de usuário (`voltarParaTelaDeLogin`),
  * já que os dados (e o perfil) podem ser bem diferentes do que estavam antes.
  */
+/** Atualiza perfil + nomes exibidos a partir da sessão (vale também depois de recarregar a página). */
+async function atualizarQuemSou() {
+  const eu = await window.api.auth.quemSou();
+  state.perfil = eu.perfil;
+  state.usuarioLogado = eu.usuario;
+  state.usuarioAdmin = eu.usuarioAdmin;
+}
+
 async function carregarDadosDoApp() {
-  state.perfil = await window.api.auth.getPerfil();
+  await atualizarQuemSou();
   await Promise.all([carregarItens(), carregarUsuarios()]);
   aplicarPerfilNaUI();
   renderCatalogo();
@@ -463,6 +472,7 @@ function exigirLogin() {
 async function voltarParaTelaDeLogin() {
   state.perfil = null;
   state.usuarioLogado = null;
+  state.usuarioAdmin = null;
   // Estado de navegação/filtro que só fazia sentido pra sessão anterior.
   state.busca = '';
   state.buscaUsuario = '';
@@ -499,7 +509,8 @@ function aplicarPerfilNaUI() {
     // foi alcançado por uma escalada mid-sessão (botão "Entrar como Admin" a partir do Default —
     // ver `sessao.contaLoginId` em main.js, que só serve pra saber pra onde voltar ao SAIR do
     // modo Admin, não pra identificar quem está logado agora).
-    label.textContent = 'Perfil: Admin';
+    // Uma conta promovida a Admin pelo Admin aparece com o próprio nome (é ela que é Admin).
+    label.textContent = 'Perfil: Admin' + (state.usuarioAdmin ? ` (${state.usuarioAdmin})` : '');
     label.classList.add('admin');
     btnToggle.textContent = 'Sair do modo Admin';
   } else {
@@ -514,6 +525,10 @@ function aplicarPerfilNaUI() {
   qsa('.default-only').forEach((el) => {
     el.classList.toggle('hidden', state.perfil === 'admin');
   });
+  // "Trocar login do Admin" mexe só no Admin principal — uma conta promovida troca a própria senha
+  // pedindo a outro Admin um "Resetar senha".
+  const btnTrocarLogin = qs('#btn-trocar-login-admin');
+  if (btnTrocarLogin) btnTrocarLogin.classList.toggle('hidden', state.perfil !== 'admin' || !!state.usuarioAdmin);
 }
 
 // ---------------------------------------------------------------------------
@@ -658,6 +673,7 @@ function configurarModalLoginAdmin() {
     const res = await window.api.auth.loginAdmin(usuario, senha);
     if (res.ok) {
       state.perfil = res.perfil;
+      state.usuarioAdmin = res.usuarioAdmin || null;
       fecharModalLoginAdmin();
       aplicarPerfilNaUI();
       renderCatalogo();
@@ -665,6 +681,7 @@ function configurarModalLoginAdmin() {
       await atualizarBannerDesfazer();
       await renderPrecificacao();
       await renderPendencias();
+      await renderContasLogin();
       toast('Modo admin ativado.');
     } else {
       const erroEl = qs('#admin-login-erro');
@@ -735,6 +752,7 @@ function configurarModalTrocarLoginAdmin() {
 async function sairAdmin() {
   const res = await window.api.auth.logoutAdmin();
   state.perfil = res.perfil;
+  state.usuarioAdmin = null;
   aplicarPerfilNaUI();
   renderCatalogo();
   await renderHistoricoDoDia();
@@ -3185,8 +3203,13 @@ async function renderContasLogin() {
   qs('tbody', tabela).innerHTML = contas
     .map(
       (c) => `
-      <tr data-conta-login-id="${c.id}">
-        <td>${escapeHtml(c.usuario)}</td>
+      <tr data-conta-login-id="${escapeHtml(c.id)}">
+        <td><span data-conta-nome>${escapeHtml(c.usuario)}</span>${c.ehVoce ? ' <span class="texto-suave">(você)</span>' : ''}</td>
+        <td>${
+          c.admin
+            ? '<span class="badge-status badge-status-admin">Admin</span>'
+            : '<span class="badge-status badge-status-default">Default</span>'
+        }</td>
         <td>${formatarDataCurta(c.criadoEm)}</td>
         <td>${
           c.precisaTrocarSenha
@@ -3195,10 +3218,17 @@ async function renderContasLogin() {
         }</td>
         <td>
           <span class="acoes-pendencia-wrap">
-            <button class="btn btn-texto btn-pequeno" data-conta-login-resetar="${c.id}" data-conta-login-usuario="${escapeHtml(
+            ${
+              c.admin
+                ? c.ehVoce
+                  ? ''
+                  : `<button class="btn btn-texto btn-pequeno" data-conta-login-admin="${escapeHtml(c.id)}" data-admin-novo="0">Tirar Admin</button>`
+                : `<button class="btn btn-texto btn-pequeno" data-conta-login-admin="${escapeHtml(c.id)}" data-admin-novo="1">Tornar Admin</button>`
+            }
+            <button class="btn btn-texto btn-pequeno" data-conta-login-resetar="${escapeHtml(c.id)}" data-conta-login-usuario="${escapeHtml(
         c.usuario
       )}">Resetar senha</button>
-            <button class="btn btn-perigo btn-pequeno" data-conta-login-excluir="${c.id}">Excluir</button>
+            ${c.ehVoce ? '' : `<button class="btn btn-perigo btn-pequeno" data-conta-login-excluir="${escapeHtml(c.id)}">Excluir</button>`}
           </span>
         </td>
       </tr>`
@@ -3210,14 +3240,40 @@ async function renderContasLogin() {
       abrirModalResetarSenhaConta(btn.dataset.contaLoginResetar, btn.dataset.contaLoginUsuario)
     );
   });
+  qsa('[data-conta-login-admin]', tabela).forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const contaId = btn.dataset.contaLoginAdmin;
+      const tornar = btn.dataset.adminNovo === '1';
+      const usuario = qs('[data-conta-nome]', btn.closest('tr'))?.textContent || '';
+      abrirConfirm(
+        tornar ? 'Tornar Admin' : 'Tirar acesso de Admin',
+        tornar
+          ? `Dar acesso de Admin para "${usuario}"? Essa conta vai ter EXATAMENTE os mesmos poderes que você: ` +
+            'editar/excluir itens, pessoas e histórico, ver e quitar pendências, importar/exportar backup e ' +
+            'criar, excluir ou promover outras contas (inclusive tirar o Admin de outras). Só faça isso com ' +
+            'alguém de total confiança. Se ela estiver logada agora, vai precisar entrar de novo.'
+          : `Tirar o acesso de Admin de "${usuario}"? A conta continua existindo e volta a ser Default. ` +
+            'Se ela estiver no modo Admin agora, a sessão dela é encerrada na hora.',
+        async () => {
+          const resAdmin = await window.api.contasLogin.definirAdmin(contaId, tornar);
+          if (!resAdmin.ok) {
+            toast(resAdmin.erro, 'erro');
+            return;
+          }
+          await renderContasLogin();
+          toast(tornar ? `"${usuario}" agora é Admin.` : `"${usuario}" voltou a ser Default.`);
+        }
+      );
+    });
+  });
   qsa('[data-conta-login-excluir]', tabela).forEach((btn) => {
     btn.addEventListener('click', () => {
       const contaId = btn.dataset.contaLoginExcluir;
       const tr = btn.closest('tr');
-      const usuario = qs('td', tr)?.textContent || '';
+      const usuario = qs('[data-conta-nome]', tr)?.textContent || '';
       abrirConfirm(
         'Excluir conta de login',
-        `Excluir a conta de login "${usuario}"? Essa pessoa não vai mais conseguir entrar como Default até ` +
+        `Excluir a conta de login "${usuario}"? Essa pessoa não vai mais conseguir entrar no app até ` +
           'que uma nova conta seja criada pra ela. Essa ação não pode ser desfeita.',
         async () => {
           const resExcluir = await window.api.contasLogin.excluir(contaId);
@@ -3256,16 +3312,31 @@ function configurarContasLogin() {
     erroEl.classList.add('hidden');
     const usuario = qs('#conta-login-usuario').value.trim();
     const senha = qs('#conta-login-senha').value;
+    const chkAdmin = qs('#conta-login-admin');
+    const comoAdmin = !!(chkAdmin && chkAdmin.checked);
 
-    const res = await window.api.contasLogin.criar(usuario, senha);
-    if (!res.ok) {
-      mostrarErroInline(erroEl, res.erro);
-      return;
-    }
-    qs('#conta-login-usuario').value = '';
-    qs('#conta-login-senha').value = '';
-    await renderContasLogin();
-    toast(`Conta de login criada para "${res.conta.usuario}" — a senha é temporária, ela vai trocar no primeiro acesso.`);
+    const criar = async () => {
+      const res = await window.api.contasLogin.criar(usuario, senha, comoAdmin);
+      if (!res.ok) {
+        mostrarErroInline(erroEl, res.erro);
+        return;
+      }
+      qs('#conta-login-usuario').value = '';
+      qs('#conta-login-senha').value = '';
+      if (chkAdmin) chkAdmin.checked = false;
+      await renderContasLogin();
+      toast(
+        `Conta ${comoAdmin ? 'de Admin ' : ''}criada para "${res.conta.usuario}" — a senha é temporária, ` +
+          'ela vai trocar no primeiro acesso.'
+      );
+    };
+    if (!comoAdmin) return criar();
+    abrirConfirm(
+      'Criar conta de Admin',
+      `A conta "${usuario}" vai ter EXATAMENTE os mesmos poderes que você (inclusive criar, excluir e ` +
+        'promover outras contas e importar backup). Só faça isso com alguém de total confiança. Continuar?',
+      criar
+    );
   });
   [qs('#conta-login-usuario'), qs('#conta-login-senha')].forEach((input) => {
     input.addEventListener('keydown', (e) => {

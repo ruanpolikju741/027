@@ -28,6 +28,7 @@ function criarGerenciadorSessao(segredo) {
     const corpo = JSON.stringify({
       p: sessao.perfil,
       c: sessao.contaLoginId,
+      a: sessao.adminContaId,
       t: sessao.pendenteTrocaSenhaContaId,
       d: sessao.pilhaDesfazer.slice(-MAX_PILHA_DESFAZER),
       f: meta.impressao || null,
@@ -54,6 +55,7 @@ function criarGerenciadorSessao(segredo) {
       const sessao = novaSessao();
       sessao.perfil = o.p === 'admin' || o.p === 'default' ? o.p : null;
       sessao.contaLoginId = typeof o.c === 'string' ? o.c : null;
+      sessao.adminContaId = typeof o.a === 'string' ? o.a : null;
       sessao.pendenteTrocaSenhaContaId = typeof o.t === 'string' ? o.t : null;
       sessao.pilhaDesfazer = Array.isArray(o.d) ? o.d.filter((x) => typeof x === 'string') : [];
       return { sessao, meta: { inicio: o.i, impressao: o.f } };
@@ -72,14 +74,23 @@ function criarGerenciadorSessao(segredo) {
 function impressaoDaSessao(data, sessao) {
   if (!sessao.perfil) return null;
   const partes = [];
+  const contas = data.contasLogin || [];
   if (sessao.contaLoginId) {
-    const conta = (data.contasLogin || []).find((c) => c.id === sessao.contaLoginId);
+    const conta = contas.find((c) => c.id === sessao.contaLoginId);
     if (!conta) return false;
-    partes.push('D', conta.id, conta.hashSenha);
+    // O acesso de Admin da conta entra na impressão: dar ou tirar esse acesso faz a pessoa entrar
+    // de novo, já com o perfil novo.
+    partes.push('D', conta.id, conta.hashSenha, conta.admin ? '1' : '0');
   }
   if (sessao.perfil === 'admin') {
-    if (!data.admin) return false;
-    partes.push('A', data.admin.usuario, data.admin.hashSenha);
+    if (sessao.adminContaId) {
+      const contaAdmin = contas.find((c) => c.id === sessao.adminContaId);
+      if (!contaAdmin || !contaAdmin.admin) return false;
+      partes.push('C', contaAdmin.id, contaAdmin.hashSenha);
+    } else {
+      if (!data.admin) return false;
+      partes.push('A', data.admin.usuario, data.admin.hashSenha);
+    }
   }
   return crypto.createHash('sha256').update(partes.join('|')).digest('hex').slice(0, 24);
 }

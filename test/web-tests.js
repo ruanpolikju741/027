@@ -352,6 +352,77 @@ const PNG_1x1 =
     await sx.fechar();
   });
 
+  await t('Admin promove uma conta a Admin: ela entra com o próprio nome e os mesmos poderes; rebaixar derruba a sessão', async () => {
+    const pastaP = pastaTemp();
+    const sp = await subir({ armazenamento: criarArmazenamentoArquivo({ pasta: pastaP }), chaveDados });
+    const chefe = criarCliente(sp.base);
+    await chefe.rpc('auth:configurarLoginInicial', { usuario: 'chefe', senha: 'chefe123' });
+    const cb = await chefe.rpc('contasLogin:criar', { usuario: 'bia', senha: 'temp123' });
+    const biaId = cb.conta.id;
+    const bia = criarCliente(sp.base);
+    const lg = await bia.rpc('auth:login', { usuario: 'bia', senha: 'temp123' });
+    await bia.rpc('auth:trocarSenhaPrimeiroAcesso', { contaId: lg.contaId, senhaAtual: 'temp123', novaSenha: 'bia12345' });
+    assert.strictEqual(await bia.rpc('auth:getPerfil'), 'default');
+    assert.strictEqual((await bia.rpc('contasLogin:definirAdmin', { contaId: biaId, admin: true })).ok, false); // Default não se promove
+
+    // Promover: a sessão Default dela cai e, ao entrar de novo, já é Admin com o próprio nome.
+    assert.strictEqual((await chefe.rpc('contasLogin:definirAdmin', { contaId: biaId, admin: true })).ok, true);
+    assert.strictEqual((await bia.rpc('items:list')).sessaoExpirada, true);
+    const lg2 = await bia.rpc('auth:login', { usuario: 'bia', senha: 'bia12345' });
+    assert.strictEqual(lg2.perfil, 'admin');
+    assert.strictEqual(lg2.usuarioAdmin, 'bia');
+    assert.deepStrictEqual(await bia.rpc('auth:quemSou'), { perfil: 'admin', usuario: 'bia', usuarioAdmin: 'bia' });
+    assert.deepStrictEqual(await chefe.rpc('auth:quemSou'), { perfil: 'admin', usuario: null, usuarioAdmin: null });
+
+    // Mesmos poderes: catálogo, contas (inclusive criar outra conta Admin).
+    assert.strictEqual((await bia.rpc('items:add', { nome: 'Caneta' })).ok, true);
+    const lista = await bia.rpc('contasLogin:listar');
+    assert.strictEqual(lista.ok, true);
+    assert.strictEqual(lista.contas.find((c) => c.id === biaId).ehVoce, true);
+    assert.strictEqual(lista.contas.find((c) => c.id === biaId).admin, true);
+    const cc = await bia.rpc('contasLogin:criar', { usuario: 'caio', senha: 'temp123', admin: true });
+    assert.strictEqual(cc.ok, true);
+
+    // Ninguém tira o próprio acesso nem exclui a própria conta; a conta-Admin não troca o login do Admin principal.
+    assert.strictEqual((await bia.rpc('contasLogin:definirAdmin', { contaId: biaId, admin: false })).ok, false);
+    assert.strictEqual((await bia.rpc('contasLogin:excluir', biaId)).ok, false);
+    assert.strictEqual((await bia.rpc('auth:redefinirLoginAdmin', { senhaAtual: 'bia12345', novoUsuario: 'x', novaSenha: 'xxxxxx1' })).ok, false);
+
+    // Conta Admin com senha temporária não serve pra "Entrar como Admin" — tem que trocar no login primeiro.
+    const dani = criarCliente(sp.base);
+    await chefe.rpc('contasLogin:criar', { usuario: 'dani', senha: 'temp123' });
+    const ld = await dani.rpc('auth:login', { usuario: 'dani', senha: 'temp123' });
+    await dani.rpc('auth:trocarSenhaPrimeiroAcesso', { contaId: ld.contaId, senhaAtual: 'temp123', novaSenha: 'dani1234' });
+    assert.strictEqual((await dani.rpc('auth:loginAdmin', { usuario: 'caio', senha: 'temp123' })).ok, false);
+    // Já com a bia (Admin de verdade) a escalada funciona — e "Sair do modo Admin" volta pra dani.
+    const esc = await dani.rpc('auth:loginAdmin', { usuario: 'bia', senha: 'bia12345' });
+    assert.strictEqual(esc.ok, true);
+    assert.strictEqual(esc.usuarioAdmin, 'bia');
+    assert.deepStrictEqual(await dani.rpc('auth:quemSou'), { perfil: 'admin', usuario: 'dani', usuarioAdmin: 'bia' });
+
+    // Rebaixar a bia: a sessão dela E a escalada da dani com o login da bia caem na hora.
+    assert.strictEqual((await chefe.rpc('contasLogin:definirAdmin', { contaId: biaId, admin: false })).ok, true);
+    assert.strictEqual((await bia.rpc('items:list')).sessaoExpirada, true);
+    assert.strictEqual((await dani.rpc('items:list')).sessaoExpirada, true);
+    const lg3 = await bia.rpc('auth:login', { usuario: 'bia', senha: 'bia12345' });
+    assert.strictEqual(lg3.perfil, 'default');
+    assert.strictEqual((await bia.rpc('items:add', { nome: 'Lápis' })).ok, false);
+
+    // Um Default importando um backup nunca traz contas com acesso de Admin.
+    const exp = await chefe.rpc('backup:exportar', { senha: 'bkp12345' });
+    const resp = await fetch(sp.base + '/api/rpc?grande=1', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'estoque-web', Cookie: bia.cookie },
+      body: JSON.stringify({ canal: 'backup:importar', args: [{ senha: 'bkp12345', modo: 'total', conteudo: exp.conteudo }] }),
+    });
+    assert.strictEqual((await resp.json()).r.ok, true);
+    const caio = criarCliente(sp.base);
+    const lc = await caio.rpc('auth:login', { usuario: 'caio', senha: 'temp123' });
+    await caio.rpc('auth:trocarSenhaPrimeiroAcesso', { contaId: lc.contaId, senhaAtual: 'temp123', novaSenha: 'caio1234' });
+    assert.strictEqual(await caio.rpc('auth:getPerfil'), 'default');
+    await sp.fechar();
+  });
+
   await t('cookie de sessão adulterado não vale nada', async () => {
     const falso = criarCliente(srv.base);
     falso.cookie = admin.cookie.slice(0, -4) + 'AAAA';

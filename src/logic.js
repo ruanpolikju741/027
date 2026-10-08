@@ -177,7 +177,13 @@ function usuarioDeLoginJaExiste(data, usuario, ignorarContaId) {
  * usada pela tela "Contas de login", exclusiva do Admin. */
 function listarContasLogin(data) {
   return (data.contasLogin || [])
-    .map((c) => ({ id: c.id, usuario: c.usuario, precisaTrocarSenha: !!c.precisaTrocarSenha, criadoEm: c.criadoEm }))
+    .map((c) => ({
+      id: c.id,
+      usuario: c.usuario,
+      admin: !!c.admin,
+      precisaTrocarSenha: !!c.precisaTrocarSenha,
+      criadoEm: c.criadoEm,
+    }))
     .sort((a, b) => a.usuario.localeCompare(b.usuario, 'pt-BR'));
 }
 
@@ -187,7 +193,7 @@ function listarContasLogin(data) {
  * obrigada a escolher a própria senha assim que logar pela primeira vez (ver
  * `trocarSenhaContaLogin`/`verificarLogin`).
  */
-function criarContaLogin(data, { usuario, senha } = {}) {
+function criarContaLogin(data, { usuario, senha, admin = false } = {}) {
   const usuarioLimpo = String(usuario || '').trim();
   if (!usuarioLimpo) {
     return { ok: false, erro: 'Informe um nome de usuário.' };
@@ -207,10 +213,29 @@ function criarContaLogin(data, { usuario, senha } = {}) {
     salt,
     hashSenha: hashSenha(String(senha), salt),
     precisaTrocarSenha: true,
+    admin: admin === true,
     criadoEm: new Date().toISOString(),
   };
   novo.contasLogin.push(conta);
-  return { ok: true, data: novo, conta: { id: conta.id, usuario: conta.usuario, precisaTrocarSenha: true, criadoEm: conta.criadoEm } };
+  return {
+    ok: true,
+    data: novo,
+    conta: { id: conta.id, usuario: conta.usuario, admin: conta.admin, precisaTrocarSenha: true, criadoEm: conta.criadoEm },
+  };
+}
+
+/**
+ * Dá (ou tira) o acesso de Admin de uma conta de login — ação exclusiva do Admin. Uma conta Admin
+ * entra com o próprio usuário/senha e tem exatamente os mesmos poderes do Admin principal (o login
+ * criado no primeiro acesso), inclusive gerenciar outras contas. O Admin principal continua
+ * existindo à parte (não é uma conta desta lista) e nunca pode ser rebaixado por aqui.
+ */
+function definirAdminContaLogin(data, contaId, admin) {
+  const novo = clonar(data);
+  const conta = (novo.contasLogin || []).find((c) => c.id === contaId);
+  if (!conta) return { ok: false, erro: 'Essa conta de login não existe (ou já foi excluída).' };
+  conta.admin = admin === true;
+  return { ok: true, data: novo, conta: { id: conta.id, usuario: conta.usuario, admin: conta.admin } };
 }
 
 /** Exclui uma conta de login do Default (ação exclusiva do Admin). Não pode ser desfeito — a
@@ -256,7 +281,14 @@ function verificarLogin(data, usuario, senha) {
   }
   const conta = (data.contasLogin || []).find((c) => c.usuario === usuarioLimpo);
   if (conta && verificarSenha(String(senha || ''), conta.salt, conta.hashSenha)) {
-    return { ok: true, tipo: 'default', contaId: conta.id, usuario: conta.usuario, precisaTrocarSenha: !!conta.precisaTrocarSenha };
+    return {
+      ok: true,
+      tipo: 'default',
+      contaId: conta.id,
+      usuario: conta.usuario,
+      admin: !!conta.admin, // conta com acesso de Admin (ver `definirAdminContaLogin`)
+      precisaTrocarSenha: !!conta.precisaTrocarSenha,
+    };
   }
   return { ok: false, erro: 'Usuário ou senha inválidos.' };
 }
@@ -1832,6 +1864,7 @@ module.exports = {
   criarContaLogin,
   excluirContaLogin,
   resetarSenhaContaLogin,
+  definirAdminContaLogin,
   verificarLogin,
   trocarSenhaContaLogin,
   listarItens,

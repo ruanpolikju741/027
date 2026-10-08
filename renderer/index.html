@@ -432,9 +432,18 @@
           "Resetar senha"), o app já pede pra ela trocar por uma senha só dela, antes de liberar o
           resto do app.
         </p>
+        <p class="dica">
+          <strong>Admin:</strong> marque "Admin" ao criar (ou use "Tornar Admin" na tabela) pra dar a
+          uma conta <strong>os mesmos poderes que o Admin</strong> — editar tudo, quitar pendências,
+          importar/exportar backup e gerenciar outras contas. Ela entra direto como Admin com o próprio
+          usuário e senha. "Tirar Admin" devolve a conta pro Default na hora.
+        </p>
         <div class="toolbar">
           <input id="conta-login-usuario" type="text" placeholder="Usuário (obrigatório)" maxlength="60" />
           <input id="conta-login-senha" type="password" placeholder="Senha temporária (mínimo 6 caracteres)" maxlength="80" />
+          <label class="filtro-importado" title="Dá a esta conta os mesmos poderes do Admin">
+            <input type="checkbox" id="conta-login-admin" /> Admin
+          </label>
           <button id="btn-conta-login-criar" class="btn btn-primary">Criar conta de login</button>
         </div>
         <p class="erro hidden" id="conta-login-criar-erro"></p>
@@ -442,7 +451,7 @@
         <div id="contas-login-vazio" class="vazio hidden">Nenhuma conta de login cadastrada ainda.</div>
         <table class="tabela hidden" id="contas-login-table">
           <thead>
-            <tr><th>Usuário</th><th>Criado em</th><th>Status</th><th>Ações</th></tr>
+            <tr><th>Usuário</th><th>Perfil</th><th>Criado em</th><th>Status</th><th>Ações</th></tr>
           </thead>
           <tbody></tbody>
         </table>

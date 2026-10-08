@@ -127,6 +127,25 @@ const arq = (nome) => path.join(stub.pastaUserData, nome);
   assert.strictEqual((await chamar('auth:loginAdmin', { usuario: 'admin', senha: 'segredo1' })).ok, true);
   assert.strictEqual((await chamar('auth:logoutAdmin')).perfil, 'default');
 
+  // Conta promovida a Admin pelo Admin: entra direto como Admin, com o próprio nome.
+  assert.strictEqual((await chamar('auth:loginAdmin', { usuario: 'admin', senha: 'segredo1' })).ok, true);
+  assert.strictEqual((await chamar('contasLogin:definirAdmin', { contaId: lg.contaId, admin: false })).ok, false); // não tira o próprio
+  await chamar('auth:logout');
+  assert.strictEqual((await chamar('auth:login', { usuario: 'admin', senha: 'segredo1' })).ok, true);
+  assert.strictEqual((await chamar('contasLogin:definirAdmin', { contaId: lg.contaId, admin: true })).ok, true);
+  await chamar('auth:logout');
+  const lgAdm = await chamar('auth:login', { usuario: 'joao', senha: 'nova123' });
+  assert.strictEqual(lgAdm.perfil, 'admin');
+  assert.strictEqual(lgAdm.usuarioAdmin, 'joao');
+  assert.strictEqual((await chamar('auth:quemSou')).usuarioAdmin, 'joao');
+  assert.strictEqual((await chamar('items:add', { nome: 'Do João' })).ok, true);
+  assert.strictEqual((await chamar('contasLogin:definirAdmin', { contaId: lg.contaId, admin: false })).ok, false);
+  await chamar('auth:logout');
+  assert.strictEqual((await chamar('auth:login', { usuario: 'admin', senha: 'segredo1' })).ok, true);
+  assert.strictEqual((await chamar('contasLogin:definirAdmin', { contaId: lg.contaId, admin: false })).ok, true);
+  await chamar('auth:logout');
+  assert.strictEqual((await chamar('auth:login', { usuario: 'joao', senha: 'nova123' })).perfil, 'default');
+
   // Importação total: zera o Admin, desloga e não reabre o primeiro acesso.
   stub.proximoAbrir = arq('b.estoquebkp');
   const imp = await chamar('backup:importar', { senha: 'bkp1234', modo: 'total' });

@@ -139,7 +139,7 @@ main { flex: 1; overflow-y: auto; padding: 22px 26px 60px; position: relative; z
 .tab-panel.active { display: block; }
 
 .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
-.toolbar input[type="search"], .toolbar input[type="text"] {
+.toolbar input[type="search"], .toolbar input[type="text"], .toolbar input[type="password"] {
   padding: 9px 16px; border: 1px solid var(--cor-borda-solida); border-radius: var(--raio-pilula);
   min-width: 220px; background: var(--cor-superficie-solida); color: var(--cor-texto);
 }
@@ -373,6 +373,9 @@ td.col-historico-check input[type="checkbox"] { accent-color: var(--cor-primaria
 }
 .badge-status-pendente { background: var(--cor-perigo-suave); color: var(--cor-perigo-escura); }
 .badge-status-concluido { background: var(--cor-sucesso-suave); color: var(--cor-sucesso); }
+.badge-status-admin { background: var(--cor-primaria-suave); color: var(--cor-primaria-escura); }
+.badge-status-default { background: rgba(90, 70, 110, 0.08); color: var(--cor-texto-suave); }
+.texto-suave { color: var(--cor-texto-suave); font-size: 12px; }
 .col-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .btn-toggle-pendente {
   border: 1px solid var(--cor-borda-solida); background: var(--cor-superficie-solida);

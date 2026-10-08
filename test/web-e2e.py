@@ -134,6 +134,33 @@ def main():
             pg.click('#btn-conta-login-criar')
             expect(pg.locator('#tab-contas-login')).to_contain_text('joana')
 
+            # Conta com acesso de Admin: criada com a caixinha "Admin" (pede confirmação).
+            pg.fill('#conta-login-usuario', 'gerente')
+            pg.fill('#conta-login-senha', 'temp123')
+            pg.check('#conta-login-admin')
+            pg.click('#btn-conta-login-criar')
+            expect(pg.locator('#confirm-mensagem')).to_contain_text('mesmos poderes')
+            pg.click('#confirm-ok')
+            linha = pg.locator('#contas-login-table tr', has_text='gerente')
+            expect(linha.locator('.badge-status-admin')).to_be_visible()
+            expect(pg.locator('#contas-login-table tr', has_text='joana').locator('[data-conta-login-admin]')).to_have_text('Tornar Admin')
+            pg.click('#btn-sair')
+            pg.click('#confirm-ok')
+            pg.fill('#login-usuario', 'gerente')
+            pg.fill('#login-senha', 'temp123')
+            pg.click('#login-confirmar-btn')
+            pg.fill('#login-nova-senha', 'gerente1')
+            pg.fill('#login-nova-senha-confirmar', 'gerente1')
+            pg.click('#login-trocar-senha-btn')
+            expect(pg.locator('#modal-login')).to_be_hidden()
+            expect(pg.locator('#perfil-label')).to_have_text('Perfil: Admin (gerente)')
+            pg.click('.tab-btn[data-tab="contas-login"]')
+            minha = pg.locator('#contas-login-table tr', has_text='gerente')
+            expect(minha).to_contain_text('(você)')
+            expect(minha.locator('[data-conta-login-excluir]')).to_have_count(0)
+            captura(pg, 'contas-admin.png')
+            passo('conta promovida a Admin: entra com o próprio nome e não pode se excluir')
+
             pg.click('.tab-btn[data-tab="backup"]')
             pg.fill('#backup-exportar-senha', 'backup123')
             with pg.expect_download() as dl:
@@ -182,6 +209,8 @@ def main():
             pg.fill('#login-nova-senha-confirmar', 'joana456')
             pg.click('#login-trocar-senha-btn')
             expect(pg.locator('#modal-login')).to_be_hidden()
+            # Espera as chamadas do login terminarem (cada resposta renova o cookie) antes de apagá-lo.
+            pg.wait_for_load_state('networkidle')
             ctx.clear_cookies()
             pg.click('.tab-btn[data-tab="usuarios"]')
             pg.click('#btn-add-usuario')  # qualquer ação

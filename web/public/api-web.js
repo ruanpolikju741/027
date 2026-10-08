@@ -262,6 +262,7 @@
   window.api = {
     auth: {
       getPerfil: () => rpc('auth:getPerfil'),
+      quemSou: () => rpc('auth:quemSou'),
       precisaConfigurarLogin: () => rpc('auth:precisaConfigurarLogin', { tokenConfiguracao }),
       configurarLoginInicial: async (usuario, senha) => {
         const res = await rpc('auth:configurarLoginInicial', { usuario, senha, tokenConfiguracao });
@@ -282,7 +283,8 @@
     },
     contasLogin: {
       listar: () => rpc('contasLogin:listar'),
-      criar: (usuario, senha) => rpc('contasLogin:criar', { usuario, senha }),
+      criar: (usuario, senha, admin) => rpc('contasLogin:criar', { usuario, senha, admin }),
+      definirAdmin: (contaId, admin) => rpc('contasLogin:definirAdmin', { contaId, admin }),
       excluir: (contaId) => rpc('contasLogin:excluir', contaId),
       resetarSenha: (contaId, novaSenha) => rpc('contasLogin:resetarSenha', { contaId, novaSenha }),
     },

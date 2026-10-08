@@ -286,6 +286,41 @@ como Admin, e permite:
 A tabela mostra, pra cada conta, se ela ainda está com senha temporária
 ("Aguardando 1º acesso") ou já é uma senha definitiva da pessoa ("Ativa").
 
+### Dar acesso de Admin a uma conta
+
+O Admin pode escolher quais contas também são **Admin, com exatamente os
+mesmos poderes que ele** (editar tudo, quitar pendências, importar/exportar
+backup — inclusive "mesclar" — e gerenciar as contas de login, inclusive
+promover ou rebaixar outras):
+
+- Na criação: marque a caixinha **"Admin"** antes de clicar em "Criar conta
+  de login".
+- Numa conta que já existe: botão **"Tornar Admin"** na tabela (e
+  **"Tirar Admin"** pra devolver a conta pro Default). Os dois pedem
+  confirmação.
+- A coluna **Perfil** mostra quem é Admin ou Default, e a sua própria conta
+  aparece marcada com "(você)".
+
+Como funciona na prática:
+
+- A conta Admin entra pela tela de login normal, com o próprio usuário e
+  senha, e já cai direto no modo Admin — o topo mostra
+  **"Perfil: Admin (nome da conta)"**. Ela também serve no botão "Entrar
+  como Admin" a partir de uma sessão do Default.
+- Dar ou tirar o acesso vale **na hora**: se a pessoa estiver com o app
+  aberto (na web), a sessão dela é encerrada e ela entra de novo já com o
+  perfil novo.
+- Ninguém tira o próprio acesso de Admin nem exclui a própria conta — isso
+  sempre fica a cargo de outro Admin.
+- O **Admin principal** (o login criado no primeiro acesso) continua à
+  parte e não pode ser rebaixado por essa tela. O botão "Trocar login do
+  Admin" é só dele; uma conta Admin que esqueceu a senha pede a outro Admin
+  um "Resetar senha".
+- Backup: as contas Admin vão no arquivo com o acesso de Admin. Se quem
+  importar for um **Default**, todas as contas do arquivo entram como
+  Default (ninguém consegue se promover a Admin importando um arquivo
+  editado).
+
 ## O que cada perfil pode fazer
 
 **Default**

@@ -25,6 +25,7 @@ const FORMATO_ARQUIVO_BACKUP = 'controle-estoque-backup-arquivo';
  */
 const CANAIS_SEM_SESSAO = new Set([
   'auth:getPerfil',
+  'auth:quemSou',
   'auth:precisaConfigurarLogin',
   'auth:configurarLoginInicial',
   'auth:login',
@@ -40,14 +41,18 @@ const CANAIS_SEM_SESSAO = new Set([
  *  - `pendenteTrocaSenhaContaId`: conta que acabou de autenticar com a senha temporária mas ainda
  *    não trocou — só nesse estado `auth:trocarSenhaPrimeiroAcesso` aceita a troca.
  *  - `pilhaDesfazer`: movimentações do Default nesta sessão que ainda podem ser desfeitas.
+ *  - `adminContaId`: quando o modo Admin veio de uma CONTA com acesso de Admin (e não do Admin
+ *    principal), qual conta foi — é o "nome" do Admin na tela, e se essa conta perder o acesso de
+ *    Admin (ou for excluída) a sessão deixa de valer.
  */
 function novaSessao() {
-  return { perfil: null, contaLoginId: null, pendenteTrocaSenhaContaId: null, pilhaDesfazer: [] };
+  return { perfil: null, contaLoginId: null, adminContaId: null, pendenteTrocaSenhaContaId: null, pilhaDesfazer: [] };
 }
 
 function limparSessao(sessao) {
   sessao.perfil = null;
   sessao.contaLoginId = null;
+  sessao.adminContaId = null;
   sessao.pendenteTrocaSenhaContaId = null;
   sessao.pilhaDesfazer.length = 0;
 }
@@ -89,6 +94,22 @@ function criarHandlers(plataforma) {
   // ---------------------------------------------------------------------------
 
   h['auth:getPerfil'] = async (sessao) => sessao.perfil;
+
+  /**
+   * Quem está logado nesta sessão, só pra exibir na tela (ex.: depois de recarregar a página na
+   * web): `usuario` = conta do Default por baixo; `usuarioAdmin` = conta com acesso de Admin que
+   * está no modo Admin agora (null pro Admin principal).
+   */
+  h['auth:quemSou'] = async (sessao) => {
+    if (!sessao.perfil) return { perfil: null, usuario: null, usuarioAdmin: null };
+    const contas = (await carregar()).contasLogin || [];
+    const nome = (id) => (id ? (contas.find((c) => c.id === id) || {}).usuario || null : null);
+    return {
+      perfil: sessao.perfil,
+      usuario: nome(sessao.contaLoginId),
+      usuarioAdmin: sessao.perfil === 'admin' ? nome(sessao.adminContaId) : null,
+    };
+  };
 
   /**
    * Se a tela de "criar login de Admin" deve aparecer — no desktop, só na primeira execução DE
@@ -138,8 +159,14 @@ function criarHandlers(plataforma) {
       sessao.pendenteTrocaSenhaContaId = res.contaId;
       return { ok: true, perfil: null, precisaTrocarSenha: true, contaId: res.contaId, usuario: res.usuario };
     }
-    sessao.perfil = 'default';
     sessao.contaLoginId = res.contaId;
+    if (res.admin) {
+      // Conta com acesso de Admin: entra direto como Admin, com o próprio nome.
+      sessao.perfil = 'admin';
+      sessao.adminContaId = res.contaId;
+      return { ok: true, perfil: 'admin', usuario: res.usuario, usuarioAdmin: res.usuario };
+    }
+    sessao.perfil = 'default';
     return { ok: true, perfil: 'default', usuario: res.usuario };
   };
 
@@ -151,17 +178,34 @@ function criarHandlers(plataforma) {
     const res = logic.trocarSenhaContaLogin(await carregar(), contaId, { senhaAtual, novaSenha });
     if (!res.ok) return res;
     await persistir(res.data);
-    sessao.perfil = 'default';
+    const conta = (res.data.contasLogin || []).find((c) => c.id === contaId);
+    const ehContaAdmin = !!(conta && conta.admin);
+    sessao.perfil = ehContaAdmin ? 'admin' : 'default';
     sessao.contaLoginId = contaId;
+    sessao.adminContaId = ehContaAdmin ? contaId : null;
     sessao.pendenteTrocaSenhaContaId = null;
-    return { ok: true, perfil: 'default' };
+    return { ok: true, perfil: sessao.perfil, usuarioAdmin: ehContaAdmin ? conta.usuario : null };
   };
 
-  /** Escalada temporária pra Admin dentro de uma sessão do Default ("Entrar como Admin"). */
+  /**
+   * Escalada temporária pra Admin dentro de uma sessão do Default ("Entrar como Admin"): aceita o
+   * login do Admin principal OU de qualquer conta com acesso de Admin.
+   */
   h['auth:loginAdmin'] = async (sessao, { usuario, senha } = {}) => {
-    if (logic.verificarLoginAdmin(await carregar(), usuario, senha)) {
+    const data = await carregar();
+    if (logic.verificarLoginAdmin(data, usuario, senha)) {
       sessao.perfil = 'admin';
-      return { ok: true, perfil: sessao.perfil };
+      sessao.adminContaId = null;
+      return { ok: true, perfil: sessao.perfil, usuarioAdmin: null };
+    }
+    const res = logic.verificarLogin(data, usuario, senha);
+    if (res.ok && res.tipo === 'default' && res.admin) {
+      if (res.precisaTrocarSenha) {
+        return { ok: false, erro: 'Essa conta ainda está com a senha temporária — entre com ela pela tela de login primeiro.' };
+      }
+      sessao.perfil = 'admin';
+      sessao.adminContaId = res.contaId;
+      return { ok: true, perfil: sessao.perfil, usuarioAdmin: res.usuario };
     }
     return { ok: false, erro: 'Usuário ou senha inválidos.' };
   };
@@ -169,6 +213,7 @@ function criarHandlers(plataforma) {
   /** "Sair do modo Admin": volta pra conta do Default por baixo, ou desloga se não houver. */
   h['auth:logoutAdmin'] = async (sessao) => {
     sessao.perfil = sessao.contaLoginId ? 'default' : null;
+    sessao.adminContaId = null;
     return { ok: true, perfil: sessao.perfil };
   };
 
@@ -180,6 +225,13 @@ function criarHandlers(plataforma) {
 
   h['auth:redefinirLoginAdmin'] = async (sessao, { senhaAtual, novoUsuario, novaSenha } = {}) => {
     if (!ehAdmin(sessao)) return { ok: false, erro: 'Somente o admin pode trocar o próprio login.' };
+    if (sessao.adminContaId) {
+      return {
+        ok: false,
+        erro: 'Esse botão troca o login do Admin principal. Pra trocar a sua senha, peça a outro Admin ' +
+          'pra usar "Resetar senha" na sua conta (aba Contas de login).',
+      };
+    }
     return aplicar(logic.redefinirLoginAdmin, { senhaAtual, novoUsuario, novaSenha });
   };
 
@@ -189,16 +241,32 @@ function criarHandlers(plataforma) {
 
   h['contasLogin:listar'] = async (sessao) => {
     if (!ehAdmin(sessao)) return { ok: false, erro: 'Somente o admin pode ver as contas de login.' };
-    return { ok: true, contas: logic.listarContasLogin(await carregar()) };
+    const contas = logic.listarContasLogin(await carregar()).map((c) => ({
+      ...c,
+      ehVoce: c.id === sessao.contaLoginId || c.id === sessao.adminContaId,
+    }));
+    return { ok: true, contas };
   };
 
-  h['contasLogin:criar'] = async (sessao, { usuario, senha } = {}) => {
+  h['contasLogin:criar'] = async (sessao, { usuario, senha, admin } = {}) => {
     if (!ehAdmin(sessao)) return { ok: false, erro: 'Somente o admin pode criar contas de login.' };
-    return aplicar(logic.criarContaLogin, { usuario, senha });
+    return aplicar(logic.criarContaLogin, { usuario, senha, admin: admin === true });
+  };
+
+  /** Dá ou tira o acesso de Admin de uma conta (exclusivo do Admin; ninguém tira o próprio acesso). */
+  h['contasLogin:definirAdmin'] = async (sessao, { contaId, admin } = {}) => {
+    if (!ehAdmin(sessao)) return { ok: false, erro: 'Somente o admin pode dar ou tirar o acesso de Admin.' };
+    if (admin !== true && (contaId === sessao.adminContaId || contaId === sessao.contaLoginId)) {
+      return { ok: false, erro: 'Você não pode tirar o seu próprio acesso de Admin — peça a outro Admin.' };
+    }
+    return aplicar(logic.definirAdminContaLogin, contaId, admin === true);
   };
 
   h['contasLogin:excluir'] = async (sessao, contaId) => {
     if (!ehAdmin(sessao)) return { ok: false, erro: 'Somente o admin pode excluir uma conta de login.' };
+    if (contaId === sessao.adminContaId || contaId === sessao.contaLoginId) {
+      return { ok: false, erro: 'Você não pode excluir a conta com que está logado agora.' };
+    }
     return aplicar(logic.excluirContaLogin, contaId);
   };
 
@@ -535,6 +603,11 @@ function criarHandlers(plataforma) {
         return { ok: false, erro: 'Senha incorreta ou arquivo corrompido.' };
       }
 
+      // Acesso de Admin só viaja no backup quando quem importa já é Admin — senão um Default
+      // poderia montar um arquivo com uma conta "Admin" e se dar acesso total.
+      if (!ehAdmin(sessao) && Array.isArray(pacote.contasLogin)) {
+        pacote = { ...pacote, contasLogin: pacote.contasLogin.map((c) => (c && typeof c === 'object' ? { ...c, admin: false } : c)) };
+      }
       const res =
         modo === 'mesclar'
           ? logic.aplicarPacoteImportacaoMesclado(await carregar(), pacote)

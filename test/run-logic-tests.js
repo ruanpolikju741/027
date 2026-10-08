@@ -213,6 +213,37 @@ t('listarContasLogin: devolve só os campos públicos (sem hash/salt), em ordem 
   assert.strictEqual(lista[0].precisaTrocarSenha, true);
 });
 
+t('definirAdminContaLogin dá e tira o acesso de Admin; verificarLogin e listar refletem isso', () => {
+  let data = logic.criarDadosIniciais();
+  data = logic.configurarLoginInicial(data, { usuario: 'admin', senha: 'senhadoadmin1' }).data;
+  data = logic.criarContaLogin(data, { usuario: 'joao', senha: 'temporaria1' }).data;
+  const criadaAdmin = logic.criarContaLogin(data, { usuario: 'maria', senha: 'temporaria1', admin: true });
+  assert.strictEqual(criadaAdmin.ok, true);
+  data = criadaAdmin.data;
+  const joao = data.contasLogin.find((c) => c.usuario === 'joao');
+  const maria = data.contasLogin.find((c) => c.usuario === 'maria');
+  assert.strictEqual(maria.admin, true);
+  assert.strictEqual(!!joao.admin, false);
+  // Só `true` de verdade vira Admin (nada de "sim"/1 vindo de fora).
+  assert.strictEqual(logic.criarContaLogin(data, { usuario: 'zeca', senha: 'temporaria1', admin: 'sim' }).data
+    .contasLogin.find((c) => c.usuario === 'zeca').admin, false);
+
+  data = logic.trocarSenhaContaLogin(data, joao.id, { senhaAtual: 'temporaria1', novaSenha: 'senhaJoao1' }).data;
+  assert.strictEqual(logic.verificarLogin(data, 'joao', 'senhaJoao1').admin, false);
+
+  const promovido = logic.definirAdminContaLogin(data, joao.id, true);
+  assert.strictEqual(promovido.ok, true);
+  data = promovido.data;
+  const login = logic.verificarLogin(data, 'joao', 'senhaJoao1');
+  assert.strictEqual(login.ok, true);
+  assert.strictEqual(login.admin, true);
+  assert.strictEqual(logic.listarContasLogin(data).find((c) => c.id === joao.id).admin, true);
+
+  data = logic.definirAdminContaLogin(data, joao.id, false).data;
+  assert.strictEqual(logic.verificarLogin(data, 'joao', 'senhaJoao1').admin, false);
+  assert.strictEqual(logic.definirAdminContaLogin(data, 'nao-existe', true).ok, false);
+});
+
 t('excluirContaLogin remove a conta; rejeita id inexistente', () => {
   let data = logic.criarDadosIniciais();
   data = logic.criarContaLogin(data, { usuario: 'joao', senha: 'temporaria1' }).data;
