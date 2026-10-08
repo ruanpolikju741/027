@@ -1,0 +1,51 @@
+# Roda todos os testes a cada envio (push) pro GitHub — a lógica, o app desktop (com um Electron
+# de mentira), o servidor web e a interface web num navegador de verdade (PC e celular).
+name: Testes
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Lógica de negócio
+        run: node test/run-logic-tests.js
+      - name: App desktop (main.js)
+        run: node test/desktop-smoke.js
+      - name: Servidor web
+        run: node test/web-tests.js
+
+  navegador:
+    runs-on: ubuntu-latest
+    needs: node
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar o navegador de teste
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Interface web no navegador (PC e celular)
+        run: python test/web-e2e.py capturas
+      - name: Guardar capturas de tela
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capturas-de-tela
+          path: capturas
+          if-no-files-found: ignore

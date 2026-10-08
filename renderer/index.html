@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; media-src 'self' data:; style-src 'self' 'unsafe-inline';" />
+  <title>Controle de Estoque</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header id="topo">
+      <div class="marca">
+        <span class="marca-icone">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l9-5 9 5-9 5-9-5Z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>
+        </span>
+        <h1>Controle de Estoque</h1>
+      </div>
+      <div id="perfil-bar">
+        <span id="perfil-label" class="badge">Perfil: Default</span>
+        <button id="btn-trocar-login-admin" class="btn btn-outline btn-pequeno admin-only hidden">
+          Trocar login do Admin…
+        </button>
+        <button id="btn-admin-toggle" class="btn btn-outline">Entrar como Admin</button>
+        <button id="btn-sair" class="btn btn-texto btn-pequeno" title="Sair e voltar pra tela de login (útil pra trocar de usuário)">
+          Sair
+        </button>
+      </div>
+    </header>
+
+    <nav id="tabs">
+      <button class="tab-btn active" data-tab="catalogo">Catálogo</button>
+      <button class="tab-btn" data-tab="usuarios">Usuários</button>
+      <button class="tab-btn" data-tab="historico">Histórico</button>
+      <button class="tab-btn" data-tab="consultar">Consultar</button>
+      <button class="tab-btn" data-tab="pendencias">Pendências</button>
+      <button class="tab-btn" data-tab="precificacao">Precificação</button>
+      <button class="tab-btn" data-tab="backup">Backup</button>
+      <button class="tab-btn admin-only hidden" data-tab="contas-login">Contas de login</button>
+    </nav>
+
+    <main>
+      <section id="tab-catalogo" class="tab-panel active">
+        <div class="toolbar">
+          <input id="busca-item" type="search" placeholder="Buscar item..." />
+          <button id="btn-exportar-quantidades-pdf" class="btn btn-outline btn-pequeno">📦 Exportar quantidades (PDF)</button>
+          <button id="btn-add-item" class="btn btn-primary admin-only hidden">+ Novo item</button>
+        </div>
+        <div id="desfazer-banner" class="desfazer-banner hidden">
+          <span id="desfazer-texto"></span>
+          <button id="btn-desfazer" class="btn btn-perigo btn-pequeno">Desfazer</button>
+        </div>
+        <div id="catalogo-vazio" class="vazio hidden">Nenhum item cadastrado ainda.</div>
+        <div id="catalogo-grid" class="grid"></div>
+      </section>
+
+      <section id="tab-usuarios" class="tab-panel">
+        <div class="toolbar">
+          <input id="novo-usuario-telefone" type="tel" placeholder="Telefone (obrigatório)" maxlength="20" />
+          <input id="novo-usuario-nome" type="text" placeholder="Nome (opcional)" maxlength="80" />
+          <button id="btn-add-usuario" class="btn btn-primary">Adicionar usuário</button>
+        </div>
+        <p class="dica">Se não informar o nome, o usuário fica identificado pelo final do telefone.</p>
+        <div class="toolbar">
+          <input id="busca-usuario" type="search" placeholder="Buscar usuário por nome ou telefone…" />
+          <button id="btn-usuarios-excluir-todos" class="btn btn-perigo btn-pequeno admin-only hidden">
+            Excluir todos os usuários…
+          </button>
+        </div>
+        <p class="dica-pequena">Favorite um usuário (★) para ele aparecer sempre no topo da lista, inclusive no
+          seletor de usuário ao movimentar um item do catálogo.</p>
+        <div id="usuarios-vazio" class="vazio hidden">Nenhum usuário cadastrado ainda.</div>
+        <div id="usuarios-grid" class="grid usuarios-grid"></div>
+      </section>
+
+      <section id="tab-historico" class="tab-panel">
+        <p class="dica">
+          Por padrão mostra <strong>todo o histórico</strong> (todos os dias e usuários). Pra ver só um
+          dia específico, preencha "De" e "Até" com a mesma data; pra um período, preencha as duas
+          datas normalmente. Pra ver só um usuário, escolha-o no filtro <strong>"Usuário"</strong> abaixo.
+        </p>
+        <div class="toolbar">
+          <label for="historico-data-inicio">De</label>
+          <input type="date" id="historico-data-inicio" />
+          <label for="historico-data-fim">Até</label>
+          <input type="date" id="historico-data-fim" />
+          <button id="btn-historico-limpar-periodo" class="btn btn-texto btn-pequeno">Ver tudo</button>
+        </div>
+        <div class="toolbar">
+          <label for="historico-usuario-busca">Usuário:</label>
+          <div class="autocomplete-wrap" id="historico-usuario-wrap">
+            <input id="historico-usuario-busca" type="text" autocomplete="off"
+              placeholder="Buscar por nome ou telefone… (em branco = todos)" />
+            <button id="btn-historico-usuario-limpar" class="btn-limpar-autocomplete hidden" type="button" title="Limpar filtro de usuário">×</button>
+            <div id="historico-usuario-sugestoes" class="autocomplete-lista hidden"></div>
+          </div>
+          <label class="filtro-importado">
+            <input type="checkbox" id="historico-filtro-importado" /> Mostrar só importados
+          </label>
+          <label class="filtro-importado">
+            <input type="checkbox" id="historico-filtro-pendente" /> Mostrar só pendentes
+          </label>
+          <button id="btn-abrir-relatorio-pdf" class="btn btn-outline btn-pequeno">📄 Gerar PDF de pedidos…</button>
+        </div>
+        <div class="toolbar admin-only hidden">
+          <button id="btn-historico-excluir-selecionados" class="btn btn-outline btn-pequeno" disabled>
+            Excluir selecionadas
+          </button>
+          <button id="btn-historico-excluir-tudo" class="btn btn-perigo btn-pequeno">
+            Excluir todo o histórico…
+          </button>
+        </div>
+        <p class="dica-pequena admin-only hidden">
+          Excluir aqui devolve a quantidade de cada movimentação removida pro item correspondente (uma
+          saída volta a somar, uma entrada volta a subtrair) — exceto se o item já não existir mais no
+          catálogo, caso em que só o registro some.
+        </p>
+        <div id="historico-vazio" class="vazio hidden">Nenhuma movimentação registrada ainda.</div>
+        <table class="tabela" id="historico-table">
+          <thead>
+            <tr>
+              <th class="col-historico-check admin-only hidden">
+                <input type="checkbox" id="historico-marcar-todas" title="Selecionar todas" />
+              </th>
+              <th>Data/Hora</th><th>Item</th><th>Movimentação</th><th>Qtd. resultante</th>
+              <th>Usuário</th><th>Entrega</th><th>Status</th><th>Feito por</th><th>Origem</th><th>Foto</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+
+        <div class="toolbar admin-only hidden">
+          <button id="btn-historico-excluir-lancamentos" class="btn btn-perigo btn-pequeno">
+            Excluir todos os lançamentos e pagamentos…
+          </button>
+        </div>
+        <h3 id="historico-lancamentos-titulo" class="hidden">Lançamentos avulsos e pagamentos do período</h3>
+        <div id="historico-lancamentos-vazio" class="vazio hidden">Nada lançado nesse período.</div>
+        <table class="tabela hidden" id="historico-lancamentos-table">
+          <thead>
+            <tr><th>Data/Hora</th><th>Usuário</th><th>Tipo</th><th>Valor</th><th>Comentário</th><th>Status</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <section id="tab-consultar" class="tab-panel">
+        <div class="toolbar">
+          <button class="btn btn-outline modo-btn active" data-modo="usuario">Consultar por usuário</button>
+          <button class="btn btn-outline modo-btn" data-modo="item">Consultar por item</button>
+        </div>
+
+        <div class="toolbar" id="consultar-alvo-usuario">
+          <label for="consultar-usuario-select">Usuário:</label>
+          <input id="consultar-usuario-busca" type="search" placeholder="Buscar por nome ou telefone…" />
+          <select id="consultar-usuario-select"></select>
+        </div>
+        <div class="toolbar hidden" id="consultar-alvo-item">
+          <label for="consultar-item-select">Item:</label>
+          <select id="consultar-item-select"></select>
+        </div>
+
+        <div class="toolbar">
+          <label><input type="radio" name="consultar-periodo" value="inteiro" checked /> Período inteiro</label>
+          <label><input type="radio" name="consultar-periodo" value="personalizado" /> Personalizar período</label>
+          <span id="consultar-periodo-datas" class="hidden">
+            De <input type="date" id="consultar-data-inicio" /> até <input type="date" id="consultar-data-fim" />
+          </span>
+          <button class="btn btn-primary" id="btn-consultar">Consultar</button>
+          <button class="btn btn-outline hidden" id="btn-consultar-pdf">Exportar PDF</button>
+        </div>
+
+        <div id="consultar-resultado">
+          <div id="consultar-vazio" class="vazio">Escolha um usuário ou item e clique em "Consultar".</div>
+
+          <div id="consultar-resumo-usuario" class="hidden">
+            <h3>Soma por item (no período)</h3>
+            <table class="tabela">
+              <thead><tr><th>Item</th><th>Total adicionado</th><th>Total removido</th><th>Saldo líquido</th></tr></thead>
+              <tbody id="consultar-soma-item-body"></tbody>
+            </table>
+            <h3 id="consultar-lancamentos-titulo" class="hidden">Lançamentos avulsos (no período)</h3>
+            <table class="tabela hidden" id="consultar-lancamentos-table">
+              <thead><tr><th>Data</th><th>Valor</th><th>Observação</th><th>Status</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <div id="consultar-resumo-item" class="hidden">
+            <h3>Resumo do item (no período)</h3>
+            <table class="tabela">
+              <thead><tr><th>Total adicionado</th><th>Total removido</th><th>Quantidade atual no catálogo</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td id="consultar-item-total-entrada">0</td>
+                  <td id="consultar-item-total-saida">0</td>
+                  <td id="consultar-item-qtd-atual">0</td>
+                </tr>
+              </tbody>
+            </table>
+            <h3 id="consultar-item-usuarios-titulo" class="hidden">Usuários envolvidos</h3>
+            <table class="tabela hidden" id="consultar-item-usuarios-table">
+              <thead><tr><th>Usuário</th><th>Total recebido</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <h3>Movimentações no período</h3>
+          <div id="consultar-transacoes-vazio" class="vazio hidden">Nenhuma movimentação encontrada.</div>
+          <table class="tabela hidden" id="consultar-transacoes-table">
+            <thead>
+              <tr>
+                <th>Data</th><th>Hora</th><th>Item</th><th>Usuário</th>
+                <th>Movimentação</th><th>Qtd. resultante</th><th>Entrega</th><th>Status</th><th>Feito por</th><th>Origem</th><th>Foto</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="tab-pendencias" class="tab-panel">
+        <p class="dica">
+          Usuários que ainda têm alguma pendência: uma saída de item marcada como <strong>Pendente</strong>,
+          ou um lançamento avulso pendente. Clique em um usuário para ver o detalhamento e o total.
+          Você também pode registrar um pagamento ali — ele abate o total mostrado, sem precisar marcar cada
+          pendência como concluída uma por uma.
+          <span class="default-only">O Admin pode bloquear usuários específicos para o perfil Default — nesse
+            caso, só o Admin consegue registrar pagamento ou lançamento avulso para eles.</span>
+          <span class="admin-only hidden">O botão <strong>"✓ Marcar como pago"</strong> quita a pendência
+            inteira de um usuário numa tacada só (registra um pagamento no valor exato do saldo dele) —
+            atalho exclusivo do Admin. Quem já foi quitado assim aparece na segunda coluna, "Já pago".</span>
+        </p>
+
+        <div class="precificacao-totais">
+          <div class="precificacao-total-card">
+            <span class="precificacao-total-label">Total pendências (geral)</span>
+            <span class="precificacao-total-valor" id="pendencias-geral-total-pendencias">R$ 0,00</span>
+          </div>
+          <div class="precificacao-total-card">
+            <span class="precificacao-total-label">Total já pago (geral)</span>
+            <span class="precificacao-total-valor" id="pendencias-geral-total-pagamentos">R$ 0,00</span>
+          </div>
+          <div class="precificacao-total-card precificacao-total-pendente">
+            <span class="precificacao-total-label">Saldo pendente (geral)</span>
+            <span class="precificacao-total-valor" id="pendencias-geral-saldo">R$ 0,00</span>
+          </div>
+        </div>
+
+        <div class="pendencias-colunas">
+          <div class="pendencias-coluna">
+            <h3 class="pendencias-coluna-titulo">Pendentes</h3>
+            <div id="pendencias-vazio" class="vazio hidden">Nenhum usuário com pendência no momento.</div>
+            <table class="tabela hidden" id="pendencias-table">
+              <thead>
+                <tr><th>Usuário</th><th>Telefone</th><th>Total pendente</th><th></th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="pendencias-coluna pendencias-coluna-quitados">
+            <h3 class="pendencias-coluna-titulo">✓ Já pago</h3>
+            <div id="pendencias-quitados-vazio" class="vazio hidden">Ninguém quitado por aqui ainda.</div>
+            <table class="tabela hidden" id="pendencias-quitados-table">
+              <thead>
+                <tr><th>Usuário</th><th>Telefone</th><th>Total pago</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="pendencias-detalhe" class="pendencias-detalhe hidden">
+          <div class="pendencias-detalhe-cabecalho">
+            <h3>Detalhamento — <span id="pendencias-detalhe-usuario"></span></h3>
+            <span class="acoes-pendencia-wrap">
+              <button class="btn btn-outline btn-pequeno" id="pendencias-detalhe-exportar-pdf">Exportar PDF</button>
+              <button class="btn btn-texto btn-pequeno" id="pendencias-detalhe-fechar">Fechar detalhamento</button>
+            </span>
+          </div>
+
+          <div class="precificacao-totais">
+            <div class="precificacao-total-card">
+              <span class="precificacao-total-label">Total pendências</span>
+              <span class="precificacao-total-valor" id="pendencias-detalhe-total-pendencias">R$ 0,00</span>
+            </div>
+            <div class="precificacao-total-card">
+              <span class="precificacao-total-label">Total já pago</span>
+              <span class="precificacao-total-valor" id="pendencias-detalhe-total-pagamentos">R$ 0,00</span>
+            </div>
+            <div class="precificacao-total-card precificacao-total-pendente">
+              <span class="precificacao-total-label">Saldo pendente</span>
+              <span class="precificacao-total-valor" id="pendencias-detalhe-saldo">R$ 0,00</span>
+            </div>
+          </div>
+
+          <h4>O que está pendente</h4>
+          <p class="dica-pequena admin-only hidden">
+            Um lançamento avulso pode ser editado ou excluído direto aqui. Uma saída de item só pode ser excluída
+            daqui (o registro some do Histórico); pra mudar a quantidade ou o status dela, use o Histórico.
+          </p>
+          <div id="pendencias-detalhe-itens-vazio" class="vazio hidden">Nada pendente para este usuário.</div>
+          <table class="tabela hidden" id="pendencias-detalhe-itens-table">
+            <thead><tr><th>Data</th><th>Descrição</th><th>Valor</th><th class="admin-only hidden">Ações</th></tr></thead>
+            <tbody></tbody>
+          </table>
+
+          <h4>Pagamentos já registrados</h4>
+          <div id="pendencias-detalhe-pagamentos-vazio" class="vazio hidden">Nenhum pagamento registrado ainda.</div>
+          <table class="tabela hidden" id="pendencias-detalhe-pagamentos-table">
+            <thead><tr><th>Data</th><th>Valor</th><th>Comentário</th><th class="admin-only hidden">Ações</th></tr></thead>
+            <tbody></tbody>
+          </table>
+
+          <div id="pendencia-pagamento-form-wrap">
+            <h4>Registrar pagamento</h4>
+            <p class="dica-pequena">
+              Não é atribuído a nenhum item específico — só abate o total pendente deste usuário. O comentário
+              é obrigatório (ex.: forma de pagamento, o que foi combinado).
+            </p>
+            <div class="toolbar">
+              <input id="pendencia-pagamento-valor" type="number" min="0.01" step="0.01" placeholder="Valor (R$)" />
+              <input id="pendencia-pagamento-comentario" type="text" maxlength="500" placeholder="Comentário (obrigatório)" />
+              <button id="pendencia-pagamento-btn" class="btn btn-primary btn-pequeno">Registrar pagamento</button>
+            </div>
+            <p class="erro hidden" id="pendencia-pagamento-erro"></p>
+          </div>
+          <p class="aviso-caixa hidden" id="pendencia-pagamento-bloqueado-aviso">
+            🔒 O Admin bloqueou este usuário: só o Admin pode registrar pagamentos para ele.
+          </p>
+        </div>
+      </section>
+
+      <section id="tab-precificacao" class="tab-panel">
+        <p class="dica">
+          Defina o valor unitário de cada item para ver o valor total do que tem em estoque, do que já
+          saiu (pagamento concluído) e do que está pendente.
+          <span class="admin-only hidden">Os valores só podem ser alterados pelo Admin, e só aqui.</span>
+          <span class="default-only">O perfil Default só pode visualizar o valor em estoque; os demais
+            totais (saído e pendente) ficam visíveis só para o Admin.</span>
+        </p>
+        <div class="precificacao-totais">
+          <div class="precificacao-total-card">
+            <span class="precificacao-total-label">Valor em estoque</span>
+            <span class="precificacao-total-valor" id="precificacao-total-estoque">R$ 0,00</span>
+          </div>
+          <div class="precificacao-total-card admin-only hidden">
+            <span class="precificacao-total-label">Valor que saiu (concluído)</span>
+            <span class="precificacao-total-valor" id="precificacao-total-saida">R$ 0,00</span>
+          </div>
+          <div class="precificacao-total-card precificacao-total-pendente admin-only hidden">
+            <span class="precificacao-total-label">Valor pendente</span>
+            <span class="precificacao-total-valor" id="precificacao-total-pendente">R$ 0,00</span>
+          </div>
+        </div>
+        <div id="precificacao-vazio" class="vazio hidden">Nenhum item cadastrado ainda.</div>
+        <table class="tabela" id="precificacao-table">
+          <thead>
+            <tr>
+              <th>Item</th><th>Qtd. em estoque</th><th>Valor unitário</th>
+              <th>Valor em estoque</th><th class="admin-only hidden">Valor saído</th>
+              <th class="admin-only hidden">Valor pendente</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <section id="tab-backup" class="tab-panel">
+        <div class="backup-bloco">
+          <h3>Exportar backup</h3>
+          <p class="dica">
+            Gera um arquivo com todo o catálogo (incluindo fotos/vídeos de cada item), usuários e
+            histórico (o login do admin nunca é incluído). O arquivo fica protegido por uma senha
+            que você escolhe agora — guarde essa senha, ela é pedida de volta na hora de importar.
+            A senha pode ter letras, números e símbolos, com no mínimo 6 caracteres.
+          </p>
+          <div class="toolbar">
+            <input id="backup-exportar-senha" type="password" placeholder="Senha de proteção (mínimo 6 caracteres)" maxlength="60" />
+            <button id="btn-backup-exportar" class="btn btn-primary">Exportar backup…</button>
+          </div>
+        </div>
+
+        <div class="backup-bloco">
+          <h3>Importar backup</h3>
+          <p class="dica">
+            Disponível para os perfis Default e Admin, mas <strong>mesclar</strong> é exclusivo do
+            Admin — o Default só pode <strong>substituir tudo</strong>.
+            <span class="admin-only hidden">Escolha como aplicar o arquivo:</span>
+            <span class="default-only">O app volta pra tela de login depois de importar, já com as
+              contas de login que vieram no arquivo.</span>
+          </p>
+
+          <div class="modo-importar-opcoes">
+            <label class="modo-importar-opcao">
+              <input type="radio" name="modo-importar" value="total" checked />
+              <span>
+                <strong>Substituir tudo</strong>
+                <span class="dica-pequena">Apaga o catálogo, usuários e histórico atuais e coloca no lugar
+                  exatamente o que está no arquivo. Essa ação não pode ser desfeita.</span>
+              </span>
+            </label>
+            <label class="modo-importar-opcao admin-only hidden">
+              <input type="radio" name="modo-importar" value="mesclar" />
+              <span>
+                <strong>Mesclar com o que já existe</strong>
+                <span class="dica-pequena">Soma ao que já está aqui: usuários do arquivo que ainda não existem
+                  são adicionados, e o histórico entra junto. A quantidade de um item que já existe no catálogo
+                  nunca aumenta com a mesclagem — o resultado é sempre a quantidade daqui MENOS a do arquivo, e
+                  pode até ficar negativa (é a única forma de um item chegar a um número negativo). Fora da
+                  mesclagem, um item nunca fica menor que zero. Itens que só existem no arquivo são adicionados
+                  normalmente.</span>
+              </span>
+            </label>
+          </div>
+
+          <p class="dica erro-forte" id="backup-importar-aviso">
+            Atenção: <strong>substituir tudo</strong> apaga o catálogo, usuários e histórico atuais e não pode
+            ser desfeito.
+          </p>
+          <div class="toolbar">
+            <input id="backup-importar-senha" type="password" placeholder="Senha usada ao exportar" maxlength="60" />
+            <button id="btn-backup-importar" class="btn btn-perigo">Importar backup…</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-contas-login" class="tab-panel">
+        <p class="dica">
+          Cadastre aqui uma conta de login pra cada pessoa que vai usar o app como Default — é o
+          que substitui a antiga entrada livre sem senha nenhuma. A senha que você definir é
+          <strong>temporária</strong>: assim que a pessoa entrar pela primeira vez (ou depois de um
+          "Resetar senha"), o app já pede pra ela trocar por uma senha só dela, antes de liberar o
+          resto do app.
+        </p>
+        <div class="toolbar">
+          <input id="conta-login-usuario" type="text" placeholder="Usuário (obrigatório)" maxlength="60" />
+          <input id="conta-login-senha" type="password" placeholder="Senha temporária (mínimo 6 caracteres)" maxlength="80" />
+          <button id="btn-conta-login-criar" class="btn btn-primary">Criar conta de login</button>
+        </div>
+        <p class="erro hidden" id="conta-login-criar-erro"></p>
+
+        <div id="contas-login-vazio" class="vazio hidden">Nenhuma conta de login cadastrada ainda.</div>
+        <table class="tabela hidden" id="contas-login-table">
+          <thead>
+            <tr><th>Usuário</th><th>Criado em</th><th>Status</th><th>Ações</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal: login obrigatório (toda vez que o app abre, exceto na primeiríssima execução —
+       ver #modal-primeiro-acesso abaixo). Dois "passos": credenciais, e (só quando a conta ainda
+       está com senha temporária) trocar a senha antes de liberar o acesso. -->
+  <div id="modal-login" class="modal-overlay hidden">
+    <div class="modal">
+      <h2>Entrar no Controle de Estoque</h2>
+
+      <div id="login-passo-credenciais">
+        <p class="dica-pequena">
+          Use o login do Admin, ou uma conta de login cadastrada pelo Admin pra você.
+        </p>
+        <label>Usuário</label>
+        <input id="login-usuario" type="text" autocomplete="off" maxlength="60" />
+        <label>Senha</label>
+        <input id="login-senha" type="password" autocomplete="off" maxlength="80" />
+        <p class="erro hidden" id="login-erro"></p>
+        <div class="modal-acoes">
+          <button class="btn btn-primary" id="login-confirmar-btn">Entrar</button>
+        </div>
+      </div>
+
+      <div id="login-passo-trocar-senha" class="hidden">
+        <p class="dica-pequena">
+          Essa conta ainda está com uma senha temporária definida pelo Admin. Escolha uma senha
+          nova e só sua antes de continuar — essa etapa só acontece uma vez.
+        </p>
+        <label>Nova senha</label>
+        <input id="login-nova-senha" type="password" autocomplete="new-password" maxlength="80" />
+        <label>Confirmar nova senha</label>
+        <input id="login-nova-senha-confirmar" type="password" autocomplete="new-password" maxlength="80" />
+        <p class="dica-pequena">Mínimo 6 caracteres — letras, números e símbolos são permitidos.</p>
+        <p class="erro hidden" id="login-trocar-senha-erro"></p>
+        <div class="modal-acoes">
+          <button class="btn btn-primary" id="login-trocar-senha-btn">Trocar senha e entrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: primeiro acesso (criar login do Admin — só aparece na primeira execução do app) -->
+  <div id="modal-primeiro-acesso" class="modal-overlay hidden">
+    <div class="modal">
+      <h2>Crie o login de Admin</h2>
+      <p class="dica-pequena" id="primeiro-acesso-motivo">
+        Essa é a primeira vez que o app abre nesta máquina. Escolha um usuário e uma senha para o
+        perfil Admin — ficam guardados criptografados, só neste computador, e são pedidos toda vez
+        que você quiser entrar como Admin depois.
+      </p>
+      <label>Usuário</label>
+      <input id="primeiro-acesso-usuario" type="text" autocomplete="off" maxlength="60" />
+      <label>Senha</label>
+      <input id="primeiro-acesso-senha" type="password" autocomplete="new-password" maxlength="80" />
+      <label>Confirmar senha</label>
+      <input id="primeiro-acesso-confirmar" type="password" autocomplete="new-password" maxlength="80" />
+      <p class="dica-pequena">Mínimo 6 caracteres — letras, números e símbolos são permitidos.</p>
+      <p class="erro hidden" id="primeiro-acesso-erro"></p>
+      <div class="modal-acoes">
+        <button class="btn btn-primary" id="primeiro-acesso-confirmar-btn">Criar login e começar a usar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: login admin -->
+  <div id="modal-admin-login" class="modal-overlay hidden">
+    <div class="modal">
+      <h2>Entrar como Admin</h2>
+      <label>Usuário</label>
+      <input id="admin-usuario" type="text" autocomplete="off" />
+      <label>Senha</label>
+      <input id="admin-senha" type="password" autocomplete="off" />
+      <p class="erro hidden" id="admin-login-erro"></p>
+      <div class="modal-acoes">
+        <button class="btn btn-texto" id="admin-login-cancelar">Cancelar</button>
+        <button class="btn btn-primary" id="admin-login-confirmar">Entrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: trocar login do Admin (usuário/senha) — exclusivo do Admin, exige a senha atual -->
+  <div id="modal-trocar-login-admin" class="modal-overlay hidden">
+    <div class="modal">
+      <h2>Trocar login do Admin</h2>
+      <p class="dica-pequena">
+        Por segurança, informe a senha atual do Admin antes de definir o novo usuário/senha.
+      </p>
+      <label>Senha atual</label>
+      <input id="trocar-login-senha-atual" type="password" autocomplete="current-password" maxlength="80" />
+      <label>Novo usuário</label>
+      <input id="trocar-login-novo-usuario" type="text" autocomplete="off" maxlength="60" />
+      <label>Nova senha</label>
+      <input id="trocar-login-nova-senha" type="password" autocomplete="new-password" maxlength="80" />
+      <label>Confirmar nova senha</label>
+      <input id="trocar-login-confirmar-senha" type="password" autocomplete="new-password" maxlength="80" />
+      <p class="dica-pequena">Mínimo 6 caracteres — letras, números e símbolos são permitidos.</p>
+      <p class="erro hidden" id="trocar-login-erro"></p>
+      <div class="modal-acoes">
+        <button class="btn btn-texto" id="trocar-login-cancelar">Cancelar</button>
+        <button class="btn btn-primary" id="trocar-login-confirmar">Trocar login</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: resetar senha de uma conta de login (aba "Contas de login", exclusivo do Admin) -->
+  <div id="modal-resetar-senha-conta" class="modal-overlay hidden">
+    <div class="modal">
+      <h2>Resetar senha — <span id="resetar-senha-conta-usuario"></span></h2>
+      <p class="dica-pequena">
+        Define uma senha temporária nova pra essa conta. Ela vai precisar trocar por uma senha só
+        dela assim que entrar de novo.
+      </p>
+      <label>Nova senha temporária</label>
+      <input id="resetar-senha-conta-nova" type="password" autocomplete="new-password" maxlength="80" />
+      <p class="dica-pequena">Mínimo 6 caracteres — letras, números e símbolos são permitidos.</p>
+      <p class="erro hidden" id="resetar-senha-conta-erro"></p>
+      <div class="modal-acoes">
+        <button class="btn btn-texto" id="resetar-senha-conta-cancelar">Cancelar</button>
+        <button class="btn btn-primary" id="resetar-senha-conta-confirmar">Resetar senha</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: novo/editar item -->
+  <div id="modal-item" class="modal-overlay hidden">
+    <div class="modal">
+      <h2 id="modal-item-titulo">Novo item</h2>
+      <label>Nome</label>
+      <input id="item-nome" type="text" maxlength="80" />
+      <label>Quantidade inicial</label>
+      <input id="item-quantidade" type="number" min="0" step="1" value="0" />
+      <label>Foto</label>
+      <input id="item-foto-input" type="file" accept="image/*,video/*" />
+      <div id="item-foto-preview" class="preview hidden"></div>
+      <p class="erro hidden" id="modal-item-erro"></p>
+      <div class="modal-acoes">
+        <button class="btn btn-texto" id="item-cancelar">Cancelar</button>
+        <button class="btn btn-primary" id="item-salvar">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: editar usuário (nome/telefone — disponível para os dois perfis) -->
+  <div id="modal-editar-usuario" class="modal-overlay hidden">
+    <div class="modal">
+      <h2>Editar usuário</h2>
+      <label>Nome (opcional)</label>
+      <input id="editar-usuario-nome" type="text" maxlength="80" />
+      <label>Telefone (obrigatório)</label>
+      <input id="editar-usuario-telefone" type="tel" maxlength="20" />
+      <p class="erro hidden" id="modal-editar-usuario-erro"></p>
+      <div class="modal-acoes">
+        <button class="btn btn-texto" id="editar-usuario-cancelar">Cancelar</button>
+        <button class="btn btn-primary" id="editar-usuario-salvar">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: movimentar itens de um usuário (a partir da aba Usuários) -->
+  <div id="modal-movimentar" class="modal-overlay hidden">
+    <div class="modal modal-largo">
+      <h2>Movimentar itens</h2>
+      <p class="dica-pequena">Usuário: <strong id="movimentar-usuario-nome"></strong></p>
+      <label>Movimentação</label>
+      <div class="qtd-controls">
+        <button type="button" id="movimentar-btn-saida" class="btn-minus" title="Remover quantidade">−</button>
+        <button type="button" id="movimentar-btn-entrada" class="btn-plus" title="Adicionar quantidade">+</button>
+      </div>
+      <label>Itens (marque um ou vários e informe a quantidade de cada um)</label>
+      <input id="movimentar-item-busca" type="search" placeholder="Buscar item..." />
+      <div class="movimentar-itens-wrap">
+        <table class="tabela tabela-compacta" id="movimentar-itens-table">
+          <thead>
+            <tr><th></th><th>Item</th><th>Estoque</th><th>Quantidade</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="pagamento-row">
+        <label><input type="radio" name="movimentar-entrega" value="entrega" /> Entrega</label>
+        <label><input type="radio" name="movimentar-entrega" value="retirada" /> Retirada</label>
+      </div>
+      <label class="pendente-checkbox admin-only hidden">
+        <input type="checkbox" id="movimentar-pendente" /> Pagamento pendente
+      </label>
+      <span class="pendente-fixo default-only hidden" title="O perfil Default sempre registra como pendente — só o Admin confirma depois">
+        🔒 Sempre registrado como pendente
+      </span>
+      <label>Foto/vídeo (opcional — anexada a todos os itens confirmados)</label>
+      <input id="movimentar-foto-input" type="file" accept="image/*,video/*" />
+      <div id="movimentar-foto-preview" class="preview hidden"></div>
+      <p class="dica-pequena" id="movimentar-dica-default">
+        O perfil Default só pode <strong>remover</strong> quantidade. Para corrigir um erro, use "Desfazer última
+        movimentação" no topo da aba Catálogo (funciona só nesta sessão do app).
+      </p>
+      <p class="aviso-caixa hidden" id="movimentar-aviso-preco">
+        ⚠ Um ou mais itens marcados abaixo (destacados em vermelho) ainda não têm valor unitário definido — isso é
+        <strong>obrigatório numa saída</strong>. Defina o preço na aba <strong>Precificação</strong> antes de
+        confirmar, ou desmarque esses itens.
+      </p>
+      <p class="erro hidden" id="modal-movimentar-erro"></p>
+      <div class="modal-acoes">
+        <button class="btn btn-texto" id="movimentar-cancelar">Cancelar</button>
+        <button class="btn btn-primary" id="movimentar-confirmar" disabled>Selecione + ou −</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: lançamentos avulsos de um usuário (valor + observação, sem item — os dois perfis podem
+       criar e editar; para um usuário bloqueado pelo Admin, o Default só pode lançar valores negativos
+       (créditos/descontos); excluir/status seguem exclusivos do Admin) -->
+  <div id="modal-lancamentos" class="modal-overlay hidden">
+    <div class="modal modal-largo">
+      <h2>Lançamentos avulsos</h2>
+      <p class="dica-pequena">Usuário: <strong id="lancamentos-usuario-nome"></strong></p>
+      <div id="lancamento-form-wrap">
+        <label>Valor (R$)</label>
+        <input id="lancamento-valor" type="number" step="0.01" placeholder="0,00 (negativo = crédito/desconto)" />
+        <label>Observação</label>
+        <input id="lancamento-observacao" type="text" maxlength="500" placeholder="Ex.: cobrança combinada por telefone" />
+        <p class="erro hidden" id="lancamento-erro"></p>
+        <button class="btn btn-primary btn-pequeno" id="lancamento-adicionar-btn">+ Adicionar lançamento</button>
+      </div>
+      <p class="aviso-caixa hidden" id="lancamento-bloqueado-aviso">
+        🔒 O Admin bloqueou este usuário: o perfil Default só pode lançar valores <strong>negativos</strong>
+        (créditos/descontos) para ele — não pode lançar cobranças (valores positivos).
+      </p>
+      <div id="lancamentos-vazio" class="vazio hidden">Nenhum lançamento avulso para este usuário.</div>
+      <table class="tabela hidden" id="lancamentos-table">
+        <thead>
+          <tr><th>Data</th><th>Valor</th><th>Observação</th><th>Status</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="modal-acoes">
+        <button class="btn btn-texto" id="lancamentos-fechar">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: gerar PDF de pedidos (Histórico), com período personalizável -->
+  <div id="modal-relatorio-pdf" class="modal-overlay hidden">
+    <div class="modal">
+      <h2>Gerar PDF de pedidos</h2>
+      <p class="dica-pequena">
+        Lista as saídas (pedidos) do período escolhido, com item, usuário e valor
+        precificado de cada um, mais o total geral. Já vem preenchido com o dia
+        selecionado no Histórico — mude as datas abaixo pra usar um período diferente.
+      </p>
+      <label for="relatorio-pdf-data-inicio">De</label>
+      <input id="relatorio-pdf-data-inicio" type="date" />
+      <label for="relatorio-pdf-data-fim">Até</label>
+      <input id="relatorio-pdf-data-fim" type="date" />
+      <p class="erro hidden" id="relatorio-pdf-erro"></p>
+      <div class="modal-acoes">
+        <button class="btn btn-texto" id="relatorio-pdf-cancelar">Cancelar</button>
+        <button class="btn btn-primary" id="relatorio-pdf-gerar">Gerar PDF…</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: confirmação genérica -->
+  <div id="modal-confirm" class="modal-overlay hidden">
+    <div class="modal">
+      <h2 id="confirm-titulo">Confirmar</h2>
+      <p id="confirm-mensagem"></p>
+      <div class="modal-acoes">
+        <button class="btn btn-texto" id="confirm-cancelar">Cancelar</button>
+        <button class="btn btn-perigo" id="confirm-ok">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lightbox de foto -->
+  <div id="lightbox" class="modal-overlay hidden">
+    <div class="lightbox-conteudo">
+      <div id="lightbox-img"></div>
+      <button class="btn btn-texto" id="lightbox-fechar">Fechar</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
