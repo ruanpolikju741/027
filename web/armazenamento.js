@@ -32,11 +32,37 @@ class ErroConflito extends Error {
 const BUCKET = 'midias';
 const TIMEOUT_MS = 30000;
 
-function criarArmazenamentoSupabase({ url, chave, permitirHttp = false }) {
-  const base = String(url || '').replace(/\/+$/, '');
-  if (!(permitirHttp ? /^https?:\/\/[^/]+$/ : /^https:\/\/[^/]+$/).test(base)) {
-    throw new Error('SUPABASE_URL inválida — use a "Project URL" do Supabase (ex.: https://abcd1234.supabase.co).');
+/**
+ * Aceita a SUPABASE_URL do jeito que a pessoa colar: a "Project URL" certinha
+ * (https://abcd.supabase.co), com caminho no fim (…/rest/v1/), sem "https://", só o id do projeto,
+ * ou até o endereço do painel (https://supabase.com/dashboard/project/abcd/…). Devolve a origem
+ * (https://abcd.supabase.co) ou null.
+ */
+function normalizarUrlSupabase(valor, permitirHttp) {
+  let texto = String(valor || '').trim().replace(/^["']|["']$/g, '');
+  const painel = /supabase\.com\/dashboard\/project\/([a-z0-9]+)/i.exec(texto);
+  if (painel) return `https://${painel[1].toLowerCase()}.supabase.co`;
+  if (/^[a-z0-9]{15,30}$/i.test(texto)) return `https://${texto.toLowerCase()}.supabase.co`;
+  if (!/^[a-z]+:\/\//i.test(texto)) texto = 'https://' + texto;
+  let u;
+  try {
+    u = new URL(texto);
+  } catch (erro) {
+    return null;
   }
+  if (u.protocol !== 'https:' && !(permitirHttp && u.protocol === 'http:')) return null;
+  return u.origin;
+}
+
+function criarArmazenamentoSupabase({ url, chave, permitirHttp = false }) {
+  const base = normalizarUrlSupabase(url, permitirHttp);
+  if (!base) {
+    throw new Error(
+      `SUPABASE_URL inválida (recebi: "${String(url || '').slice(0, 120)}") — use a "Project URL" do Supabase ` +
+        '(ex.: https://abcd1234.supabase.co).'
+    );
+  }
+  chave = String(chave || '').trim();
   if (!chave) throw new Error('Falta a variável SUPABASE_CHAVE_SECRETA (a "secret key" do projeto no Supabase).');
 
   // Chaves novas (sb_secret_...) vão só no cabeçalho `apikey`; a chave antiga (service_role, um
