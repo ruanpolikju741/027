@@ -1,0 +1,25 @@
+# Render Blueprint — sobe a versão web do Controle de Estoque no plano GRATUITO do Render.
+# No Render: New → Blueprint → escolha este repositório do GitHub. Ele vai pedir só as duas
+# variáveis do Supabase; as outras duas são geradas sozinhas (GUARDE uma cópia delas — ver README).
+services:
+  - type: web
+    name: controle-estoque
+    runtime: node
+    plan: free
+    region: virginia
+    # Nenhuma dependência pra instalar: o servidor web usa só o próprio Node.
+    buildCommand: echo "Sem dependencias para instalar"
+    startCommand: node web/server.js
+    healthCheckPath: /api/vivo
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_CHAVE_SECRETA
+        sync: false
+      - key: CHAVE_DADOS
+        generateValue: true
+      - key: TOKEN_PRIMEIRO_ACESSO
+        generateValue: true

@@ -1,0 +1,56 @@
+{
+  "name": "controle-estoque",
+  "version": "1.0.0",
+  "description": "Controle de estoque com perfis Default e Admin — app desktop (Electron) e versão web (PC e celular)",
+  "main": "main.js",
+  "author": "Ruan",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "start:web": "node web/server.js",
+    "dist": "electron-builder --win",
+    "dist:portable": "electron-builder --win portable",
+    "test": "node test/run-logic-tests.js && node test/desktop-smoke.js && node test/web-tests.js",
+    "test:logic": "node test/run-logic-tests.js",
+    "test:desktop": "node test/desktop-smoke.js",
+    "test:web": "node test/web-tests.js"
+  },
+  "devDependencies": {
+    "electron": "^32.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.ruan.controleestoque",
+    "productName": "Controle de Estoque",
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist_installer"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

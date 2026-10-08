@@ -1,0 +1,7 @@
+node_modules/
+dist_installer/
+dados-web-local/
+capturas/
+*.estoquebkp
+.env
+*.log
