@@ -128,6 +128,27 @@ def main():
             info.value.close()
             passo('pendências: totais gerais e PDF do usuário')
 
+            # "Marcar como recebido": resolve a pendência individual sem registrar pagamento algum
+            # e sem devolver a quantidade ao item — diferente de "Excluir do histórico".
+            item_antes = pg.evaluate("() => window.api.items.list().then(l => l[0].quantidade)")
+            assert item_antes == 8, item_antes  # 10 iniciais - 2 da saída pendente
+            pg.locator('#pendencias-detalhe-itens-table [data-pendencia-marcar-recebido]').first.click()
+            expect(pg.locator('#pendencias-geral-saldo')).to_have_text(re.compile(r'0,00'))
+            expect(pg.locator('#pendencias-detalhe-saldo')).to_have_text(re.compile(r'0,00'))
+            expect(pg.locator('#pendencias-detalhe-itens-vazio')).to_be_visible()
+            item_depois = pg.evaluate("() => window.api.items.list().then(l => l[0].quantidade)")
+            assert item_depois == 8, item_depois  # quantidade do item não volta (diferente de excluir)
+            passo('pendências: "Marcar como recebido" resolve sem mexer na quantidade do item')
+
+            # Quantidade fracionária no catálogo (não só número inteiro).
+            pg.click('.tab-btn[data-tab="catalogo"]')
+            pg.click('#btn-add-item')
+            pg.fill('#item-nome', 'Ração a granel')
+            pg.fill('#item-quantidade', '2.5')
+            pg.click('#item-salvar')
+            expect(pg.locator('#catalogo-grid .card', has_text='Ração a granel')).to_contain_text('2.5')
+            passo('quantidade fracionária: item criado com 2.5 unidades')
+
             pg.click('.tab-btn[data-tab="contas-login"]')
             pg.fill('#conta-login-usuario', 'joana')
             pg.fill('#conta-login-senha', 'temp123')

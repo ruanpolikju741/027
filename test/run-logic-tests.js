@@ -501,6 +501,31 @@ t('entrada simples (admin, sem usuário) soma quantidade', () => {
   assert.strictEqual(res.transacao.usuarioNome, null);
 });
 
+t('quantidade aceita número quebrado (não só inteiro), arredondado a 3 casas', () => {
+  const { data, itemId } = dataComItem(2.5);
+  assert.strictEqual(data.items.find((i) => i.id === itemId).quantidade, 2.5);
+
+  const entrada = logic.ajustarQuantidade(data, { itemId, tipo: 'entrada', quantidade: 0.25, perfil: 'admin' });
+  assert.strictEqual(entrada.ok, true);
+  assert.strictEqual(entrada.item.quantidade, 2.75);
+  assert.strictEqual(entrada.transacao.quantidade, 0.25);
+
+  // Ruído de ponto flutuante (0.1 + 0.2 ≠ 0.3 em JS puro) não vaza pro dado gravado.
+  const saida = logic.ajustarQuantidade(entrada.data, { itemId, tipo: 'saida', quantidade: 0.1, perfil: 'admin' });
+  const saida2 = logic.ajustarQuantidade(saida.data, { itemId, tipo: 'saida', quantidade: 0.2, perfil: 'admin' });
+  assert.strictEqual(saida2.item.quantidade, 2.45);
+
+  // Mais de 3 casas decimais é arredondado, não rejeitado.
+  const precisaoExtra = logic.ajustarQuantidade(saida2.data, { itemId, tipo: 'entrada', quantidade: 0.123456, perfil: 'admin' });
+  assert.strictEqual(precisaoExtra.ok, true);
+  assert.strictEqual(precisaoExtra.item.quantidade, 2.573);
+
+  // Zero e negativo continuam inválidos, texto e NaN também.
+  assert.strictEqual(logic.ajustarQuantidade(data, { itemId, tipo: 'entrada', quantidade: 0, perfil: 'admin' }).ok, false);
+  assert.strictEqual(logic.ajustarQuantidade(data, { itemId, tipo: 'entrada', quantidade: -1.5, perfil: 'admin' }).ok, false);
+  assert.strictEqual(logic.ajustarQuantidade(data, { itemId, tipo: 'entrada', quantidade: 'abc', perfil: 'admin' }).ok, false);
+});
+
 t('saida não pode deixar estoque negativo (admin, sem usuário)', () => {
   const { data, itemId } = dataComItem(2);
   const res = logic.ajustarQuantidade(data, { itemId, tipo: 'saida', quantidade: 5, perfil: 'admin' });

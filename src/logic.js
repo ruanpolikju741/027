@@ -327,7 +327,7 @@ function listarItens(data) {
 function adicionarItem(data, { nome, foto, quantidade }) {
   const nomeLimpo = String(nome || '').trim();
   if (!nomeLimpo) return { ok: false, erro: 'Informe o nome do item.' };
-  const qtdInicial = Number.isFinite(Number(quantidade)) ? Math.max(0, Math.trunc(Number(quantidade))) : 0;
+  const qtdInicial = Number.isFinite(Number(quantidade)) ? Math.max(0, arredondarQuantidade(Number(quantidade))) : 0;
 
   const novo = clonar(data);
   const item = {
@@ -543,7 +543,9 @@ function excluirTodosUsuarios(data) {
  * params:
  *  - itemId (obrigatório)
  *  - tipo: 'entrada' | 'saida'
- *  - quantidade: inteiro positivo (a quantidade a somar/subtrair)
+ *  - quantidade: número positivo (a quantidade a somar/subtrair — aceita casas decimais, ex.:
+ *      2.5, para itens fracionários como kg/litros/metros; é arredondado a 3 casas, ver
+ *      `arredondarQuantidade`)
  *  - usuarioId: id de usuário existente (opcional)
  *  - usuarioTelefoneNovo: telefone de um novo usuário a cadastrar na hora (opcional;
  *      se já existir um usuário com esse telefone, reaproveita em vez de duplicar)
@@ -571,7 +573,7 @@ function excluirTodosUsuarios(data) {
 function ajustarQuantidade(data, params) {
   const { itemId, tipo, usuarioId, usuarioNomeNovo, usuarioTelefoneNovo, tipoEntrega, pendente, foto, perfil, exigirPreco } =
     params;
-  const quantidade = Math.trunc(Number(params.quantidade));
+  const quantidade = arredondarQuantidade(params.quantidade);
 
   if (!itemId) return { ok: false, erro: 'Item inválido.' };
   if (tipo !== 'entrada' && tipo !== 'saida') return { ok: false, erro: 'Tipo de movimentação inválido.' };
@@ -643,7 +645,9 @@ function ajustarQuantidade(data, params) {
   }
 
   const delta = tipo === 'entrada' ? quantidade : -quantidade;
-  const quantidadeResultante = item.quantidade + delta;
+  // Arredonda o RESULTADO também (não só `quantidade` acima) — sem isso, ruído de ponto flutuante
+  // (tipo 0.1 + 0.2) se acumularia aos poucos no saldo do item a cada movimentação fracionária.
+  const quantidadeResultante = arredondarQuantidade(item.quantidade + delta);
   // O limite de "nunca menos que zero" vale só para saída no dia a dia — uma
   // entrada precisa poder recuperar um item que ficou negativo por causa de
   // uma mesclagem de backup (ver aplicarPacoteImportacaoMesclado), então não
@@ -719,7 +723,7 @@ function desfazerTransacao(data, transacaoId) {
   if (!item) {
     return { ok: false, erro: 'O item dessa movimentação não existe mais no catálogo.' };
   }
-  item.quantidade += transacao.quantidade;
+  item.quantidade = arredondarQuantidade(item.quantidade + transacao.quantidade);
   item.atualizadoEm = new Date().toISOString();
   novo.transacoes.splice(idx, 1);
   return { ok: true, data: novo, item, transacaoDesfeita: transacao };
@@ -808,9 +812,9 @@ function reverterEfeitoDeTransacaoNoItem(novo, transacao) {
   const item = novo.items.find((i) => i.id === transacao.itemId);
   if (!item) return;
   if (transacao.tipo === 'saida') {
-    item.quantidade += transacao.quantidade;
+    item.quantidade = arredondarQuantidade(item.quantidade + transacao.quantidade);
   } else if (transacao.tipo === 'entrada') {
-    item.quantidade -= transacao.quantidade;
+    item.quantidade = arredondarQuantidade(item.quantidade - transacao.quantidade);
   }
   item.atualizadoEm = new Date().toISOString();
 }
@@ -1453,6 +1457,16 @@ function arredondarValor(numero) {
 }
 
 /**
+ * Arredonda uma quantidade para até 3 casas decimais — evita ruído de ponto flutuante (tipo
+ * 0.1 + 0.2) sem forçar número inteiro: o catálogo aceita itens fracionários (kg, litros,
+ * metros, caixas de meia dúzia…), não só unidades inteiras. Propositalmente NÃO troca NaN por
+ * 0 (diferente de `arredondarValor`) — quem chama decide o que fazer com entrada inválida.
+ */
+function arredondarQuantidade(numero) {
+  return Math.round(Number(numero) * 1000) / 1000;
+}
+
+/**
  * Lista cada item do catálogo com seu valor unitário e os três totais
  * pedidos: valor em estoque (quantidade atual x valor unitário), valor do
  * que já saiu com pagamento concluído, e valor do que saiu mas está
@@ -1706,7 +1720,7 @@ function aplicarPacoteImportacaoMesclado(data, pacote) {
     if (itemLocal) {
       mapaItemIdImportadoParaLocal.set(itemImportado.id, itemLocal.id);
     } else {
-      const quantidadeImportada = Math.max(0, Math.trunc(Number(itemImportado.quantidade) || 0));
+      const quantidadeImportada = Math.max(0, arredondarQuantidade(Number(itemImportado.quantidade) || 0));
       const novoItem = {
         id: gerarId('item'),
         nome: String(itemImportado.nome || '').trim() || 'Item importado',
@@ -1768,7 +1782,7 @@ function aplicarPacoteImportacaoMesclado(data, pacote) {
       const itemLocalRef = novo.items.find((i) => i.id === itemIdLocal);
       if (itemLocalRef) {
         const delta = transacaoImportada.tipo === 'entrada' ? transacaoImportada.quantidade : -transacaoImportada.quantidade;
-        itemLocalRef.quantidade += delta;
+        itemLocalRef.quantidade = arredondarQuantidade(itemLocalRef.quantidade + delta);
         itemLocalRef.atualizadoEm = new Date().toISOString();
         itensComMovimentoNovo.add(itemIdLocal);
       }

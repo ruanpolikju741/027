@@ -802,7 +802,7 @@ function cardHTML(item) {
         <div class="card-secao-movimentar">
           <div class="qtd-controls">
             <button class="btn-minus" data-action="selecionar-saida" title="Selecionar remover quantidade">−</button>
-            <input type="number" class="qtd-input" min="1" step="1" value="1" />
+            <input type="number" class="qtd-input" min="0.001" step="any" value="1" />
             <button class="btn-plus${isAdmin ? '' : ' hidden'}" data-action="selecionar-entrada" title="Selecionar adicionar quantidade">+</button>
           </div>
           <button class="btn btn-primary btn-pequeno btn-confirmar-qtd" data-action="confirmar-qtd" disabled>Confirmar</button>
@@ -1004,7 +1004,7 @@ async function aplicarMovimentacao(card, itemId, tipo) {
   erroEl.classList.add('hidden');
 
   const qtdInput = qs('.qtd-input', card);
-  const quantidade = parseInt(qtdInput.value, 10);
+  const quantidade = parseFloat(qtdInput.value);
   if (!Number.isFinite(quantidade) || quantidade <= 0) {
     mostrarErroInline(erroEl, 'Informe uma quantidade válida.');
     return;
@@ -1128,7 +1128,7 @@ function configurarModalItem() {
     if (itemEmEdicaoId) {
       res = await window.api.items.edit(itemEmEdicaoId, { nome, foto: fotoModalDataUrl });
     } else {
-      const quantidade = parseInt(qs('#item-quantidade').value, 10) || 0;
+      const quantidade = parseFloat(qs('#item-quantidade').value) || 0;
       res = await window.api.items.add({ nome, quantidade, foto: fotoModalDataUrl });
     }
 
@@ -1171,7 +1171,7 @@ function renderMovimentarItensTable() {
         <td><input type="checkbox" class="movimentar-item-check" data-mov-check="${i.id}" /></td>
         <td>${escapeHtml(i.nome)} <span class="badge-sem-preco hidden">sem preço definido</span></td>
         <td>${i.quantidade}</td>
-        <td><input type="number" class="movimentar-item-qtd" data-mov-qtd="${i.id}" min="1" step="1" value="1" disabled /></td>
+        <td><input type="number" class="movimentar-item-qtd" data-mov-qtd="${i.id}" min="0.001" step="any" value="1" disabled /></td>
       </tr>`;
     })
     .join('');
@@ -1327,7 +1327,7 @@ function configurarModalMovimentar() {
       const itemId = cb.dataset.movCheck;
       const item = state.items.find((i) => i.id === itemId);
       const qtdInput = qs(`[data-mov-qtd="${itemId}"]`);
-      const quantidade = parseInt(qtdInput.value, 10);
+      const quantidade = parseFloat(qtdInput.value);
       if (!Number.isFinite(quantidade) || quantidade <= 0) {
         erroEl.textContent = `Informe uma quantidade válida para "${item ? item.nome : itemId}".`;
         erroEl.classList.remove('hidden');
@@ -2907,12 +2907,22 @@ async function abrirDetalhePendencia(usuarioId) {
         const valorCol = editavel
           ? `<input type="number" class="input-preco" step="0.01" value="${p.valor}" />`
           : formatarMoeda(p.valor);
+        // "Marcar como recebido": resolve essa pendência específica (some da lista) sem registrar
+        // pagamento nenhum e sem mexer na quantidade do item — diferente de "Excluir", que no caso
+        // de uma saída de item DEVOLVE a quantidade ao catálogo (desfaz a venda). É o mesmo
+        // mecanismo do botão "✓ Concluir" da aba Histórico (`definirPendente`), só que acessível
+        // direto daqui, pendência por pendência.
         const acoesTd = isAdmin
-          ? `<td class="col-acoes-pendencia"><span class="acoes-pendencia-wrap">${
-              isLancamento
-                ? `<button class="btn btn-perigo btn-pequeno" data-excluir-lancamento="${p.id}">Excluir</button>`
-                : `<button class="btn btn-perigo btn-pequeno" data-excluir-transacao="${p.id}">Excluir do histórico</button>`
-            }</span></td>`
+          ? `<td class="col-acoes-pendencia"><span class="acoes-pendencia-wrap">
+              <button class="btn btn-primary btn-pequeno" data-pendencia-marcar-recebido="${p.id}" data-pendencia-marcar-recebido-tipo="${
+                isLancamento ? 'lancamento' : 'transacao'
+              }" title="Marca essa pendência como recebida/concluída, sem registrar pagamento e sem mexer na quantidade do item">✓ Marcar como recebido</button>
+              ${
+                isLancamento
+                  ? `<button class="btn btn-perigo btn-pequeno" data-excluir-lancamento="${p.id}">Excluir</button>`
+                  : `<button class="btn btn-perigo btn-pequeno" data-excluir-transacao="${p.id}">Excluir do histórico</button>`
+              }
+            </span></td>`
           : '';
         return `
           <tr${isLancamento ? ` data-lancamento-id="${p.id}"` : ''}>
@@ -3059,7 +3069,24 @@ function configurarPendencias() {
     await atualizarTudoAposMudarPendencia();
     toast('Lançamento atualizado.');
   });
-  tabelaItens.addEventListener('click', (e) => {
+  tabelaItens.addEventListener('click', async (e) => {
+    const btnReceber = e.target.closest('[data-pendencia-marcar-recebido]');
+    if (btnReceber) {
+      const id = btnReceber.dataset.pendenciaMarcarRecebido;
+      const tipo = btnReceber.dataset.pendenciaMarcarRecebidoTipo;
+      const res =
+        tipo === 'lancamento'
+          ? await window.api.lancamentos.definirPendente(id, false)
+          : await window.api.historico.definirPendente(id, false);
+      if (!res.ok) {
+        toast(res.erro, 'erro');
+        return;
+      }
+      await atualizarTudoAposMudarPendencia();
+      await renderPrecificacao();
+      toast('Pendência marcada como recebida — a quantidade do item não muda.');
+      return;
+    }
     const btnLancamento = e.target.closest('[data-excluir-lancamento]');
     if (btnLancamento) {
       const id = btnLancamento.dataset.excluirLancamento;

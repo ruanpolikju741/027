@@ -381,6 +381,20 @@ Como funciona na prática:
 - Gerar o **PDF de pedidos** (aba "Histórico") — ver "Relatório de pedidos em
   PDF" abaixo.
 
+## Quantidades com casas decimais
+
+A quantidade de um item — tanto a **quantidade inicial** (ao criar o item)
+quanto qualquer **entrada/saída** registrada depois — aceita número
+quebrado, não só inteiro: por exemplo, `2.5` (kg, litros, metros, meia
+dúzia…), não apenas `1`, `2`, `3`. Use ponto como separador decimal (padrão
+de campo numérico do navegador/sistema).
+
+Internamente, toda quantidade é arredondada a **3 casas decimais**
+(0,001) — o suficiente pra qualquer unidade fracionária comum, e evita que
+pequenos erros de ponto flutuante do computador (ex.: somar 0,1 com 0,2) se
+acumulem aos poucos no saldo do item depois de muitas movimentações. Uma
+quantidade zero ou negativa continua sendo recusada, igual a antes.
+
 ## Corrigindo um erro de quantidade (Default)
 
 O perfil Default **nunca pode adicionar quantidade** — nem como devolução,
@@ -708,20 +722,28 @@ totais — pra guardar ou entregar pra pessoa. É uma foto do estado ATUAL da
 pendência dele (não pede período, diferente do relatório de pedidos ou da
 Consulta), disponível tanto para o Default quanto para o Admin.
 
-**Editar ou excluir um registro** fica direto nas linhas do detalhamento:
+**Editar, resolver ou excluir um registro** fica direto nas linhas do
+detalhamento. Toda pendência (lançamento ou saída de item) tem, além do
+botão de excluir, um **"✓ Marcar como recebido"** — ver "Marcar uma
+pendência específica como recebida", logo abaixo — que resolve só aquele
+registro, sem registrar pagamento e sem mexer na quantidade do item.
 - Um **lançamento avulso** pendente: o valor (pode ser negativo — funciona
   como crédito/desconto) e a descrição ficam editáveis direto na linha
   (salva ao sair do campo), **disponível para os dois perfis, em qualquer
   usuário** (mesmo um bloqueado — a restrição de bloqueio vale só pra criar
-  um lançamento novo, não pra editar um já existente). Só o **Admin** tem o
-  botão **"Excluir"** pra removê-lo definitivamente. A mesma edição/exclusão
-  também está disponível na tela de **"Lançamentos"** da aba Usuários (onde
-  o lançamento também pode ser criado e ter o status alternado, esse último
+  um lançamento novo, não pra editar um já existente). Só o **Admin** tem os
+  botões **"✓ Marcar como recebido"** e **"Excluir"** (esse último remove o
+  lançamento definitivamente). A mesma edição/exclusão também está
+  disponível na tela de **"Lançamentos"** da aba Usuários (onde o
+  lançamento também pode ser criado e ter o status alternado, esse último
   exclusivo do Admin).
-- Uma **saída de item pendente**: só pode ser excluída daqui, exclusivo do
-  Admin (o registro some do Histórico e a quantidade volta pro item,
-  igual ao "Excluir" de lá) — pra mudar só o status dela sem excluir, use o
-  Histórico ou o "Desfazer última movimentação".
+- Uma **saída de item pendente**: exclusivo do Admin, tem dois caminhos
+  bem diferentes — **"✓ Marcar como recebido"** resolve a pendência e a
+  quantidade do item **continua como está** (não volta ao catálogo); já
+  **"Excluir do histórico"** apaga o registro de vez e **devolve** a
+  quantidade ao item, como se a venda nunca tivesse acontecido. Pra mudar
+  só o status dela sem nenhum dos dois efeitos, use o Histórico ou o
+  "Desfazer última movimentação".
 - Um **pagamento**: valor (sempre positivo — é dinheiro de fato recebido) e
   comentário também ficam editáveis direto na linha, **disponível para os
   dois perfis**, mesmo pra um usuário bloqueado. Só o Admin tem o botão
@@ -780,6 +802,33 @@ aqui pode mudar se esse preço for alterado depois — diferente do total
 por pagamentos (os dois números respondem perguntas diferentes: um é "quanto
 esse item tem pendente no total", o outro é "quanto esse usuário ainda deve,
 descontando o que ele já pagou").
+
+### Marcar uma pendência específica como recebida (exclusivo do Admin)
+
+Cada linha de **"O que está pendente"**, no detalhamento de um usuário, tem
+um botão **"✓ Marcar como recebido"** — diferente do "✓ Marcar como pago"
+(que quita o **saldo inteiro** do usuário de uma vez, registrando um
+pagamento) e diferente do "Excluir"/"Excluir do histórico" (que **apaga o
+registro**, e no caso de uma saída de item **devolve a quantidade** ao
+catálogo, desfazendo a venda).
+
+"Marcar como recebido":
+- Resolve **só aquela pendência** (ela some da lista de "O que está
+  pendente" e deixa de contar no saldo do usuário).
+- **Não registra nenhum pagamento** — não entra na coluna "Total já pago"
+  nem no histórico de pagamentos.
+- **Não mexe na quantidade do item** — o que já foi vendido continua
+  descontado do catálogo, exatamente como está; nada "volta pro estoque".
+- É o mesmo mecanismo do botão **"✓ Concluir"** da aba Histórico (alternar
+  o status de Pendente para Concluído), só que acessível direto por aqui,
+  pendência por pendência — e pode ser desfeito a qualquer momento, voltando
+  no Histórico e marcando o registro como Pendente de novo.
+
+É útil, por exemplo, quando a pendência já foi resolvida de um jeito que não
+é um pagamento registrado no app (ex.: acerto combinado por fora, troca,
+cortesia) e o Admin só quer que ela pare de aparecer como pendente, sem
+mexer no estoque nem criar um lançamento de pagamento pra representar algo
+que não foi efetivamente pago em dinheiro.
 
 ## Usuários e telefone
 
