@@ -306,36 +306,55 @@ const PNG_1x1 =
     assert.strictEqual((await outro.rpc('items:list')).sessaoExpirada, true);
   });
 
-  await t('Default: exporta backup completo (como no desktop) e não pode importar "mesclando"', async () => {
+  await t('Backup é exclusivo do Admin: Default não pode exportar nem importar, em nenhum modo', async () => {
     const def = criarCliente(srv.base);
     await admin.rpc('contasLogin:criar', { usuario: 'carlos', senha: 'temp123' });
     const lg = await def.rpc('auth:login', { usuario: 'carlos', senha: 'temp123' });
     await def.rpc('auth:trocarSenhaPrimeiroAcesso', { contaId: lg.contaId, senhaAtual: 'temp123', novaSenha: 'carlos123' });
+
     const mesclar = await def.rpc('backup:importar', { senha: 'backup123', modo: 'mesclar', conteudo: backupConteudo });
     assert.strictEqual(mesclar.ok, false);
     assert.match(mesclar.erro, /admin/i);
+    const total = await def.rpc('backup:importar', { senha: 'backup123', modo: 'total', conteudo: backupConteudo });
+    assert.strictEqual(total.ok, false);
+    assert.match(total.erro, /admin/i);
 
     const exp = await def.rpc('backup:exportar', { senha: 'carlos-bkp' });
-    assert.strictEqual(exp.ok, true);
-    assert.ok(exp.totalContasLogin >= 1);
+    assert.strictEqual(exp.ok, false);
+    assert.match(exp.erro, /admin/i);
+
+    // Admin continua podendo os dois, sem restrição nenhuma.
+    const expAdmin = await admin.rpc('backup:exportar', { senha: 'admin-bkp123' });
+    assert.strictEqual(expAdmin.ok, true);
+
     // E um argumento nulo não derruba nada (vira erro normal de validação).
     const nulo = await def.rpc('usuarios:editar', null);
     assert.strictEqual(nulo.ok, false);
   });
 
-  await t('Default importa "substituir tudo" pelo envio grande (?grande=1): volta pro login, só valem as contas do arquivo', async () => {
+  await t('Admin importa "substituir tudo" pelo envio grande (?grande=1): volta pro login, só valem as contas do arquivo; Default nem chega a tentar', async () => {
     const pastaX = pastaTemp();
     const sx = await subir({ armazenamento: criarArmazenamentoArquivo({ pasta: pastaX }), chaveDados });
     const adm = criarCliente(sx.base);
     await adm.rpc('auth:configurarLoginInicial', { usuario: 'chefe', senha: 'chefe123' });
     await adm.rpc('contasLogin:criar', { usuario: 'ezio', senha: 'ezio123' });
     const def = criarCliente(sx.base);
-    const lg = await def.rpc('auth:login', { usuario: 'ezio', senha: 'ezio123' });
-    await def.rpc('auth:trocarSenhaPrimeiroAcesso', { contaId: lg.contaId, senhaAtual: 'ezio123', novaSenha: 'ezio456' });
+    const lgDef = await def.rpc('auth:login', { usuario: 'ezio', senha: 'ezio123' });
+    await def.rpc('auth:trocarSenhaPrimeiroAcesso', { contaId: lgDef.contaId, senhaAtual: 'ezio123', novaSenha: 'ezio456' });
+
+    // Default (mesmo pelo envio grande) é rejeitado antes de qualquer processamento do arquivo.
+    const respDef = await fetch(sx.base + '/api/rpc?grande=1', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'estoque-web', Cookie: def.cookie },
+      body: JSON.stringify({ canal: 'backup:importar', args: [{ senha: 'backup123', modo: 'total', conteudo: backupConteudo }] }),
+    });
+    const impDef = (await respDef.json()).r;
+    assert.strictEqual(impDef.ok, false);
+    assert.match(impDef.erro, /admin/i);
 
     const resp = await fetch(sx.base + '/api/rpc?grande=1', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'estoque-web', Cookie: def.cookie },
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'estoque-web', Cookie: adm.cookie },
       body: JSON.stringify({ canal: 'backup:importar', args: [{ senha: 'backup123', modo: 'total', conteudo: backupConteudo }] }),
     });
     const imp = (await resp.json()).r;
@@ -344,6 +363,7 @@ const PNG_1x1 =
     assert.strictEqual((await adm.rpc('items:list')).sessaoExpirada, true); // Admin antigo caiu
     const novo = criarCliente(sx.base);
     assert.strictEqual((await novo.rpc('auth:login', { usuario: 'chefe', senha: 'chefe123' })).ok, false);
+    assert.strictEqual((await novo.rpc('auth:login', { usuario: 'ezio', senha: 'ezio456' })).ok, false); // conta antiga também caiu
     const itens = await (async () => {
       const lgJ = await novo.rpc('auth:login', { usuario: 'joana', senha: 'temp123' }); // conta que veio no arquivo
       return lgJ;
@@ -408,18 +428,30 @@ const PNG_1x1 =
     assert.strictEqual(lg3.perfil, 'default');
     assert.strictEqual((await bia.rpc('items:add', { nome: 'Lápis' })).ok, false);
 
-    // Um Default importando um backup nunca traz contas com acesso de Admin.
+    // Backup é exclusivo do Admin — a bia (agora Default de novo) nem consegue tentar importar,
+    // mesmo pelo envio grande.
     const exp = await chefe.rpc('backup:exportar', { senha: 'bkp12345' });
-    const resp = await fetch(sp.base + '/api/rpc?grande=1', {
+    const respBia = await fetch(sp.base + '/api/rpc?grande=1', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'estoque-web', Cookie: bia.cookie },
       body: JSON.stringify({ canal: 'backup:importar', args: [{ senha: 'bkp12345', modo: 'total', conteudo: exp.conteudo }] }),
     });
-    assert.strictEqual((await resp.json()).r.ok, true);
+    const rBia = (await respBia.json()).r;
+    assert.strictEqual(rBia.ok, false);
+    assert.match(rBia.erro, /admin/i);
+
+    // O Admin importando o mesmo arquivo preserva as contas com acesso de Admin que vieram nele
+    // (ex.: caio, criado como Admin antes do export).
+    const respChefe = await fetch(sp.base + '/api/rpc?grande=1', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'estoque-web', Cookie: chefe.cookie },
+      body: JSON.stringify({ canal: 'backup:importar', args: [{ senha: 'bkp12345', modo: 'total', conteudo: exp.conteudo }] }),
+    });
+    assert.strictEqual((await respChefe.json()).r.ok, true);
     const caio = criarCliente(sp.base);
     const lc = await caio.rpc('auth:login', { usuario: 'caio', senha: 'temp123' });
     await caio.rpc('auth:trocarSenhaPrimeiroAcesso', { contaId: lc.contaId, senhaAtual: 'temp123', novaSenha: 'caio1234' });
-    assert.strictEqual(await caio.rpc('auth:getPerfil'), 'default');
+    assert.strictEqual(await caio.rpc('auth:getPerfil'), 'admin'); // Admin importou → mantém o admin:true vindo do arquivo
     await sp.fechar();
   });
 

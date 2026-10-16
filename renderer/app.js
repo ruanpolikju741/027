@@ -2000,9 +2000,13 @@ async function renderHistoricoDoDia() {
       const sinal = t.tipo === 'entrada' ? '+' : '−';
       const classe = t.tipo === 'entrada' ? 'tag-entrada' : 'tag-saida';
       const fotoHtml = thumbMidiaHtml(t.foto, t.id);
-      const checkboxHtml = isAdmin
+      // Admin pode selecionar qualquer movimentação pra excluir; Default só as que ele mesmo
+      // marcou como "📝 Marcar como recebido" (ver `historico:excluirSelecionados` em handlers.js,
+      // que reforça essa mesma regra no backend).
+      const podeSelecionarParaExcluir = isAdmin || (t.pendente && t.marcadoRecebidoDefault);
+      const checkboxHtml = podeSelecionarParaExcluir
         ? `<td class="col-historico-check"><input type="checkbox" class="historico-check" value="${t.id}" /></td>`
-        : '';
+        : '<td class="col-historico-check"></td>';
       const statusHtml =
         t.usuarioId || t.usuarioNome
           ? `${statusBadgeHtml(t)}${
@@ -2034,10 +2038,10 @@ async function renderHistoricoDoDia() {
     img.addEventListener('click', () => abrirLightbox(img.src));
   });
 
+  qsa('.historico-check', tbody).forEach((cb) => {
+    cb.addEventListener('change', atualizarBotaoHistoricoExcluirSelecionadas);
+  });
   if (isAdmin) {
-    qsa('.historico-check', tbody).forEach((cb) => {
-      cb.addEventListener('change', atualizarBotaoHistoricoExcluirSelecionadas);
-    });
     qsa('[data-toggle-pendente]', tbody).forEach((btn) => {
       btn.addEventListener('click', async () => {
         const transacaoId = btn.dataset.togglePendente;
@@ -3042,6 +3046,46 @@ function configurarPendencias() {
     await atualizarTudoAposMudarPendencia();
     toast('Pagamento registrado.');
   });
+
+  // "Pagamento geral" (exclusivo do Admin, ver `logic.registrarPagamentoGeral`): recebe um valor
+  // total (ex.: o caixa do dia), compara com a soma da coluna "✓ Já pago" (não com os cartões de
+  // resumo do topo) e lança como pagamento pro usuário "ezio" — o valor inteiro quando não cobre
+  // essa soma, ou só o excedente quando cobre e sobra. Nos dois casos, remove por completo quem
+  // estava em "✓ Já pago" (pagamento e pendência de origem — esse valor já entrou na conta aqui
+  // e já foi recebido de verdade).
+  const btnPagamentoGeral = qs('#btn-pendencias-pagamento-geral');
+  if (btnPagamentoGeral) {
+    btnPagamentoGeral.addEventListener('click', () => {
+      const erroEl = qs('#pendencias-pagamento-geral-erro');
+      erroEl.classList.add('hidden');
+      const valor = parseFloat(qs('#pendencias-pagamento-geral-valor').value);
+      if (!Number.isFinite(valor) || valor <= 0) {
+        mostrarErroInline(erroEl, 'Informe um valor válido, maior que zero.');
+        return;
+      }
+      abrirConfirm(
+        'Pagamento geral',
+        `Lançar um pagamento geral de ${formatarMoeda(valor)}? Se esse valor não cobrir a soma da ` +
+          'coluna "✓ Já pago", ele é lançado inteiro pro usuário "ezio"; se cobrir e sobrar, só o ' +
+          'excedente é lançado. Nos dois casos, quem estava em "✓ Já pago" é removido por completo ' +
+          '(pagamento e pendência de origem) — esse dinheiro já foi recebido de verdade. Essa ação ' +
+          'não pode ser desfeita.',
+        async () => {
+          const res = await window.api.pendencias.pagamentoGeral(valor);
+          if (!res.ok) {
+            mostrarErroInline(erroEl, res.erro);
+            return;
+          }
+          qs('#pendencias-pagamento-geral-valor').value = '';
+          await atualizarTudoAposMudarPendencia();
+          toast(
+            `Pagamento geral lançado — ${formatarMoeda(res.sobra)} abatido(s) da pendência do "ezio"` +
+              (res.usuariosZerados > 0 ? `, e ${res.usuariosZerados} usuário(s) removido(s) por completo (já quitados).` : '.')
+          );
+        }
+      );
+    });
+  }
 
   // "O que está pendente": editar (só lançamentos, ao vivo na linha, aberto aos dois perfis para
   // qualquer usuário) e excluir (lançamento ou saída de item) — excluir continua exclusivo do Admin.

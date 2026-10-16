@@ -352,6 +352,7 @@
       listarQuitados: () => rpc('pendencias:listarQuitados'),
       quitarUsuario: (usuarioId, comentario) => rpc('pendencias:quitarUsuario', { usuarioId, comentario }),
       totalizar: () => rpc('pendencias:totalizar'),
+      pagamentoGeral: (valor) => rpc('pendencias:pagamentoGeral', { valor }),
     },
     consulta: {
       porUsuario: (usuarioId, dataInicio, dataFim) => rpc('consulta:porUsuario', { usuarioId, dataInicio, dataFim }),

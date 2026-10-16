@@ -392,6 +392,12 @@ function criarHandlers(plataforma) {
     return aplicar(logic.quitarPendenciaUsuario, usuarioId, comentario);
   };
 
+  /** "Pagamento geral" — ação exclusiva do Admin (ver `logic.registrarPagamentoGeral`). */
+  h['pendencias:pagamentoGeral'] = async (sessao, { valor } = {}) => {
+    if (!ehAdmin(sessao)) return { ok: false, erro: 'Somente o admin pode usar o pagamento geral.' };
+    return aplicar(logic.registrarPagamentoGeral, valor);
+  };
+
   // ---------------------------------------------------------------------------
   // Histórico
   // ---------------------------------------------------------------------------
@@ -415,9 +421,30 @@ function criarHandlers(plataforma) {
     return aplicar(logic.excluirTodoHistorico);
   };
 
+  /**
+   * O Admin pode excluir qualquer movimentação selecionada; o Default só pode excluir as que ele
+   * mesmo marcou como "📝 Marcar como recebido" (`marcadoRecebidoDefault`) e que ainda estão
+   * pendentes — nunca o histórico inteiro de uma vez (isso continua exclusivo do Admin, ver
+   * `historico:excluirTudo`).
+   */
   h['historico:excluirSelecionados'] = async (sessao, idsTransacoes) => {
-    if (!ehAdmin(sessao)) return { ok: false, erro: 'Somente o admin pode excluir movimentações do histórico.' };
-    return aplicar(logic.excluirTransacoes, Array.isArray(idsTransacoes) ? idsTransacoes : []);
+    const ids = Array.isArray(idsTransacoes) ? idsTransacoes : [];
+    if (!ehAdmin(sessao)) {
+      const dados = await carregar();
+      const podeExcluir = ids.every((id) => {
+        const t = dados.transacoes.find((tr) => tr.id === id);
+        return !!t && t.pendente && t.marcadoRecebidoDefault;
+      });
+      if (!podeExcluir) {
+        return {
+          ok: false,
+          erro:
+            'O perfil Default só pode excluir movimentações que ele mesmo marcou como ' +
+            '"📝 Marcar como recebido".',
+        };
+      }
+    }
+    return aplicar(logic.excluirTransacoes, ids);
   };
 
   /** Se há uma movimentação do Default pra desfazer nesta sessão (e qual é). */
@@ -539,9 +566,11 @@ function criarHandlers(plataforma) {
   // ---------------------------------------------------------------------------
   // Backup — o arquivo é o mesmo no desktop e na web (dá pra levar de um pro outro).
   // O login do ADMIN nunca entra no backup; as contas de login do Default entram.
+  // Exclusivo do Admin: o Default nem vê a aba Backup na tela.
   // ---------------------------------------------------------------------------
 
   h['backup:exportar'] = async (sessao, { senha } = {}) => {
+    if (!ehAdmin(sessao)) return { ok: false, erro: 'Somente o admin pode exportar backup.' };
     if (!senha || String(senha).length < 6) {
       return {
         ok: false,
@@ -571,14 +600,7 @@ function criarHandlers(plataforma) {
   };
 
   h['backup:importar'] = async (sessao, { senha, modo, conteudo } = {}) => {
-    // "Mesclar" é exclusivo do Admin; o Default só pode substituir tudo ou exportar.
-    if (modo === 'mesclar' && !ehAdmin(sessao)) {
-      return {
-        ok: false,
-        erro: 'Somente o admin pode importar mesclando com os dados atuais. O perfil Default só pode ' +
-          'importar substituindo tudo, ou exportar.',
-      };
-    }
+    if (!ehAdmin(sessao)) return { ok: false, erro: 'Somente o admin pode importar backup.' };
     if (!senha) return { ok: false, erro: 'Informe a senha usada ao exportar o backup.' };
 
     try {

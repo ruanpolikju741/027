@@ -1882,6 +1882,134 @@ t('quitarPendenciaUsuario: registra um pagamento no valor exato do saldo, zerand
   assert.strictEqual(inexistente.ok, false);
 });
 
+t('registrarPagamentoGeral: compara com a soma da coluna "✓ Já pago" (não com o total geral), lança excedente ou o valor inteiro pro "ezio" e remove por completo quem estava quitado (exemplo do pedido: Beraht quitado com R$200, valor informado R$500 → sobra R$300 pro ezio, e o Beraht some de vez, sem voltar a dever nada)', () => {
+  let { data, itemId } = dataComItem(200);
+  data = logic.definirPrecoItem(data, itemId, 10).data; // R$10/un
+
+  // Beraht: pendência de R$200 (20un), paga em dobradinha — fica QUITADO (saldo zerado) e some do
+  // card "✓ Já pago" por R$200. Essa é a base da comparação, não o total geral do sistema.
+  const rBeraht = logic.adicionarUsuario(data, { nome: 'Beraht', telefone: '27900000111' });
+  data = rBeraht.data;
+  data = logic.ajustarQuantidade(data, {
+    itemId, tipo: 'saida', quantidade: 20, usuarioId: rBeraht.usuario.id, tipoEntrega: 'retirada', pendente: true, perfil: 'admin',
+  }).data;
+  data = logic.adicionarPagamento(data, { usuarioId: rBeraht.usuario.id, valor: 200, observacao: 'Pagou tudo' }).data;
+  assert.strictEqual(logic.detalharPendenciasUsuario(data, rBeraht.usuario.id).totalPendente, 0);
+  assert.ok(logic.listarUsuariosQuitados(data).some((u) => u.usuarioId === rBeraht.usuario.id));
+
+  // "ezio" (sem acento, case-insensitive na busca) com uma pendência de R$1000 (100un), ainda sem
+  // nenhum pagamento — ele continua pendente, não quitado, então NÃO entra na base da comparação.
+  const rEzio = logic.adicionarUsuario(data, { nome: 'Ezio', telefone: '27900000222' });
+  data = rEzio.data;
+  data = logic.ajustarQuantidade(data, {
+    itemId, tipo: 'saida', quantidade: 100, usuarioId: rEzio.usuario.id, tipoEntrega: 'retirada', pendente: true, perfil: 'admin',
+  }).data;
+
+  // A base é a soma da coluna "✓ Já pago" (só o Beraht, R$200) — NÃO o total geral de pagamentos
+  // do sistema (que aqui também é 200, mas em outro cenário com alguém parcialmente pago os dois
+  // números divergiriam; é por isso que a comparação tem que usar `listarUsuariosQuitados`).
+  assert.strictEqual(logic.detalharPendenciasUsuario(data, rEzio.usuario.id).totalPendente, 1000);
+
+  const res = logic.registrarPagamentoGeral(data, 500);
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(res.baseJaPago, 200);
+  assert.strictEqual(res.sobra, 300); // excedente: 500 - 200
+  assert.strictEqual(res.usuariosZerados, 1);
+  assert.strictEqual(res.pagamento.usuarioId, rEzio.usuario.id);
+  assert.strictEqual(res.pagamento.valor, 300);
+  data = res.data;
+
+  // Pendência do "ezio" cai de 1000 pra 700 (1000 - 300).
+  assert.strictEqual(logic.detalharPendenciasUsuario(data, rEzio.usuario.id).totalPendente, 700);
+
+  // O Beraht é removido por completo: pagamento apagado E a pendência de origem resolvida (sem
+  // nenhum pagamento novo pra ele) — ele não volta a aparecer nem em "✓ Já pago" nem em
+  // "Pendentes", porque esse dinheiro já foi recebido de verdade.
+  const beraht = logic.detalharPendenciasUsuario(data, rBeraht.usuario.id);
+  assert.strictEqual(beraht.totalPagamentos, 0);
+  assert.strictEqual(beraht.totalPendencias, 0);
+  assert.strictEqual(beraht.totalPendente, 0);
+  assert.strictEqual(logic.listarPagamentosPorUsuario(data, rBeraht.usuario.id).length, 0);
+  assert.ok(!logic.listarUsuariosQuitados(data).some((u) => u.usuarioId === rBeraht.usuario.id));
+  assert.ok(!logic.listarUsuariosPendentes(data).some((u) => u.usuarioId === rBeraht.usuario.id));
+  // A movimentação original continua no histórico (não é apagada), só deixa de estar pendente.
+  const transacaoBeraht = data.transacoes.find((t) => t.usuarioId === rBeraht.usuario.id);
+  assert.ok(transacaoBeraht);
+  assert.strictEqual(transacaoBeraht.pendente, false);
+
+  // Rejeita: valor inválido.
+  assert.strictEqual(logic.registrarPagamentoGeral(data, 0).ok, false);
+  assert.strictEqual(logic.registrarPagamentoGeral(data, -10).ok, false);
+  assert.strictEqual(logic.registrarPagamentoGeral(data, 'abc').ok, false);
+});
+
+t('registrarPagamentoGeral: valor MENOR que a soma da coluna "✓ Já pago" lança o valor informado inteiro pro "ezio" (não um excedente), e remove por completo quem estava quitado', () => {
+  let { data, itemId } = dataComItem(200);
+  data = logic.definirPrecoItem(data, itemId, 10).data;
+
+  // Usuário A: quitado com R$500 (base da comparação).
+  const rA = logic.adicionarUsuario(data, { nome: 'Fulano', telefone: '27900000333' });
+  data = rA.data;
+  data = logic.ajustarQuantidade(data, {
+    itemId, tipo: 'saida', quantidade: 50, usuarioId: rA.usuario.id, tipoEntrega: 'retirada', pendente: true, perfil: 'admin',
+  }).data;
+  data = logic.adicionarPagamento(data, { usuarioId: rA.usuario.id, valor: 500, observacao: 'Pagou tudo' }).data;
+
+  const rEzio = logic.adicionarUsuario(data, { nome: 'ezio', telefone: '27900000444' });
+  data = rEzio.data;
+  data = logic.ajustarQuantidade(data, {
+    itemId, tipo: 'saida', quantidade: 100, usuarioId: rEzio.usuario.id, tipoEntrega: 'retirada', pendente: true, perfil: 'admin',
+  }).data;
+
+  const res = logic.registrarPagamentoGeral(data, 300); // 300 < 500
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(res.baseJaPago, 500);
+  assert.strictEqual(res.sobra, 300); // valor informado inteiro, não um excedente
+  assert.strictEqual(res.usuariosZerados, 1);
+  assert.strictEqual(res.pagamento.valor, 300);
+  data = res.data;
+
+  assert.strictEqual(logic.detalharPendenciasUsuario(data, rEzio.usuario.id).totalPendente, 700);
+  // "Fulano" some por completo (pagamento removido E pendência de origem resolvida).
+  const a = logic.detalharPendenciasUsuario(data, rA.usuario.id);
+  assert.strictEqual(a.totalPagamentos, 0);
+  assert.strictEqual(a.totalPendencias, 0);
+  assert.strictEqual(a.totalPendente, 0);
+  assert.ok(!logic.listarUsuariosQuitados(data).some((u) => u.usuarioId === rA.usuario.id));
+  assert.ok(!logic.listarUsuariosPendentes(data).some((u) => u.usuarioId === rA.usuario.id));
+});
+
+t('registrarPagamentoGeral: rejeita quando o valor informado é exatamente igual à soma da coluna "✓ Já pago" (sem excedente) e não altera nada', () => {
+  let { data, itemId } = dataComItem(100);
+  data = logic.definirPrecoItem(data, itemId, 10).data;
+
+  const rB = logic.adicionarUsuario(data, { nome: 'Usuário Quitado', telefone: '27900000555' });
+  data = rB.data;
+  data = logic.ajustarQuantidade(data, {
+    itemId, tipo: 'saida', quantidade: 15, usuarioId: rB.usuario.id, tipoEntrega: 'retirada', pendente: true, perfil: 'admin',
+  }).data;
+  data = logic.adicionarPagamento(data, { usuarioId: rB.usuario.id, valor: 150, observacao: 'Pagou tudo' }).data;
+
+  const res = logic.registrarPagamentoGeral(data, 150);
+  assert.strictEqual(res.ok, false);
+
+  // Nada foi alterado: o pagamento do usuário continua lá, ele continua quitado.
+  assert.strictEqual(logic.detalharPendenciasUsuario(data, rB.usuario.id).totalPagamentos, 150);
+  assert.ok(logic.listarUsuariosQuitados(data).some((u) => u.usuarioId === rB.usuario.id));
+});
+
+t('registrarPagamentoGeral: rejeita quando não existe usuário "ezio" cadastrado', () => {
+  let { data, itemId } = dataComItem(50);
+  data = logic.definirPrecoItem(data, itemId, 5).data;
+  const ru = logic.adicionarUsuario(data, { nome: 'Alguém', telefone: '27900000333' });
+  data = ru.data;
+  data = logic.adicionarPagamento(data, { usuarioId: ru.usuario.id, valor: 100, observacao: 'Pago' }).data;
+
+  const res = logic.registrarPagamentoGeral(data, 200);
+  assert.strictEqual(res.ok, false);
+  assert.ok(/ezio/i.test(res.erro));
+});
+
 t('listarPedidosParaRelatorio: filtra por período, só saídas, com valor precificado e total geral', () => {
   let { data, itemId } = dataComItem(50);
   data = logic.definirPrecoItem(data, itemId, 5).data; // R$ 5/un

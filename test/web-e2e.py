@@ -140,6 +140,90 @@ def main():
             assert item_depois == 8, item_depois  # quantidade do item não volta (diferente de excluir)
             passo('pendências: "Marcar como recebido" resolve sem mexer na quantidade do item')
 
+            # "Pagamento geral": compara com a soma da coluna "✓ Já pago" (`pendencias.listarQuitados`),
+            # NÃO com o total geral do sistema. "Beraht" fica quitado com R$15 (2un x R$7,50) — essa é
+            # a base da comparação. "Ezio" tem uma pendência separada de R$7,50, ainda em aberto.
+            setup_geral = pg.evaluate("""async () => {
+                const itens = await window.api.items.list();
+                const item = itens.find((i) => i.nome === 'Caixa de Água');
+                const beraht = await window.api.usuarios.add('Beraht', '27900005555');
+                const rB = await window.api.items.adjust({ itemId: item.id, tipo: 'saida', quantidade: 2,
+                  usuarioId: beraht.usuario.id, tipoEntrega: 'retirada', pendente: true });
+                await window.api.pagamentos.adicionar(beraht.usuario.id, 15, 'Pagou tudo');
+                const ezio = await window.api.usuarios.add('Ezio', '27900001234');
+                const rE = await window.api.items.adjust({ itemId: item.id, tipo: 'saida', quantidade: 1,
+                  usuarioId: ezio.usuario.id, tipoEntrega: 'retirada', pendente: true });
+                return { berahtId: beraht.usuario.id, ezioId: ezio.usuario.id, ok: rB.ok && rE.ok };
+            }""")
+            assert setup_geral['ok'], setup_geral
+            beraht_id = setup_geral['berahtId']
+            ezio_id = setup_geral['ezioId']
+            quitados_antes = pg.evaluate(
+                "(id) => window.api.pendencias.listarQuitados().then(l => l.some((u) => u.usuarioId === id))",
+                beraht_id,
+            )
+            assert quitados_antes, 'Beraht deveria estar na coluna "✓ Já pago" antes do pagamento geral'
+            pg.click('.tab-btn[data-tab="pendencias"]')
+            pg.evaluate('() => renderPendencias()')
+            pg.fill('#pendencias-pagamento-geral-valor', '20')  # base = 15 (Beraht) → excedente de 5
+            pg.click('#btn-pendencias-pagamento-geral')
+            pg.click('#confirm-ok')
+            saldo_ezio = pg.evaluate(
+                "(id) => window.api.pendencias.detalharUsuario(id).then(d => d.totalPendente)", ezio_id
+            )
+            assert saldo_ezio == 2.5, saldo_ezio  # 7.5 - 5 (excedente: 20 - 15)
+            detalhe_beraht = pg.evaluate(
+                "(id) => window.api.pendencias.detalharUsuario(id)", beraht_id
+            )
+            assert detalhe_beraht['totalPagamentos'] == 0, detalhe_beraht
+            assert detalhe_beraht['totalPendencias'] == 0, detalhe_beraht
+            assert detalhe_beraht['totalPendente'] == 0, detalhe_beraht  # removido por completo, não volta a dever
+            quitados_depois = pg.evaluate(
+                "(id) => window.api.pendencias.listarQuitados().then(l => l.some((u) => u.usuarioId === id))",
+                beraht_id,
+            )
+            assert not quitados_depois, 'Beraht deveria ter saído de "✓ Já pago" (removido por completo)'
+            pendentes_depois = pg.evaluate(
+                "(id) => window.api.pendencias.listarUsuarios().then(l => l.some((u) => u.usuarioId === id))",
+                beraht_id,
+            )
+            assert not pendentes_depois, 'Beraht não deveria voltar a aparecer em "Pendentes" (já foi recebido)'
+            passo('pagamento geral: compara com a coluna "✓ Já pago", lança o excedente pro "Ezio" e remove o Beraht por completo')
+
+            # Valor MENOR que a soma da coluna "✓ Já pago" — lança o valor informado INTEIRO pro
+            # "Ezio" (não rejeita, não calcula excedente nenhum). Pra isso, precisa de alguém de
+            # novo quitado (o Beraht saiu da coluna no passo anterior): "Fulano Geral" fica quitado com R$15.
+            setup_menor = pg.evaluate("""async () => {
+                const itens = await window.api.items.list();
+                const item = itens.find((i) => i.nome === 'Caixa de Água');
+                const fulano = await window.api.usuarios.add('Fulano Geral', '27900006666');
+                const r = await window.api.items.adjust({ itemId: item.id, tipo: 'saida', quantidade: 2,
+                  usuarioId: fulano.usuario.id, tipoEntrega: 'retirada', pendente: true });
+                await window.api.pagamentos.adicionar(fulano.usuario.id, 15, 'Pagou tudo');
+                return { fulanoId: fulano.usuario.id, ok: r.ok };
+            }""")
+            assert setup_menor['ok'], setup_menor
+            fulano_id = setup_menor['fulanoId']
+            pg.evaluate('() => renderPendencias()')
+            saldo_ezio_antes = pg.evaluate(
+                "(id) => window.api.pendencias.detalharUsuario(id).then(d => d.totalPendente)", ezio_id
+            )
+            assert saldo_ezio_antes == 2.5, saldo_ezio_antes
+            pg.fill('#pendencias-pagamento-geral-valor', '2')  # base = 15 (Fulano) → valor inteiro (menor)
+            pg.click('#btn-pendencias-pagamento-geral')
+            pg.click('#confirm-ok')
+            saldo_ezio_depois = pg.evaluate(
+                "(id) => window.api.pendencias.detalharUsuario(id).then(d => d.totalPendente)", ezio_id
+            )
+            assert saldo_ezio_depois == 0.5, saldo_ezio_depois  # 2.5 - 2 (valor inteiro, sem excedente)
+            detalhe_fulano = pg.evaluate(
+                "(id) => window.api.pendencias.detalharUsuario(id)", fulano_id
+            )
+            assert detalhe_fulano['totalPagamentos'] == 0, detalhe_fulano
+            assert detalhe_fulano['totalPendencias'] == 0, detalhe_fulano
+            assert detalhe_fulano['totalPendente'] == 0, detalhe_fulano  # removido por completo também
+            passo('pagamento geral: valor menor que a coluna "✓ Já pago" lança o valor inteiro pro "Ezio"')
+
             # Quantidade fracionária no catálogo (não só número inteiro).
             pg.click('.tab-btn[data-tab="catalogo"]')
             pg.click('#btn-add-item')
@@ -206,10 +290,53 @@ def main():
             expect(pg.locator('#perfil-label')).to_contain_text('Default')
             passo('conta do Default: senha temporária trocada no primeiro login')
 
+            # Histórico: Default só pode selecionar/excluir uma movimentação que ele mesmo marcou
+            # como "📝 Marcar como recebido" — nunca o histórico inteiro de uma vez.
+            setup_mov = pg.evaluate("""async () => {
+                const usuarios = await window.api.usuarios.list();
+                const maria = usuarios.find((u) => u.nome === 'Maria Souza');
+                const itens = await window.api.items.list();
+                const item = itens.find((i) => i.nome === 'Caixa de Água');
+                const antes = item.quantidade;
+                const r = await window.api.items.adjust({ itemId: item.id, tipo: 'saida', quantidade: 1,
+                  usuarioId: maria.id, tipoEntrega: 'retirada' });
+                return { ok: r.ok, qtdAntes: antes, itemId: item.id };
+            }""")
+            assert setup_mov['ok'], setup_mov
+            pg.click('.tab-btn[data-tab="historico"]')
+            pg.evaluate('() => renderHistoricoDoDia()')
+            expect(pg.locator('#btn-historico-excluir-tudo')).to_be_hidden()  # exclusivo do Admin
+            linhas_antes = pg.locator('#historico-table tbody tr').count()
+            primeira_linha = pg.locator('#historico-table tbody tr').first
+            expect(primeira_linha.locator('.historico-check')).to_have_count(0)  # ainda não marcada
+            primeira_linha.locator('.btn-marcar-recebido').click()
+            expect(primeira_linha.locator('.historico-check')).to_have_count(1)  # marcada → aparece a caixinha
+            primeira_linha.locator('.historico-check').check()
+            pg.click('#btn-historico-excluir-selecionados')
+            pg.click('#confirm-ok')
+            expect(pg.locator('#historico-table tbody tr')).to_have_count(linhas_antes - 1)
+            qtd_depois = pg.evaluate(
+                "(id) => window.api.items.list().then(l => l.find((i) => i.id === id).quantidade)", setup_mov['itemId']
+            )
+            assert qtd_depois == setup_mov['qtdAntes'], qtd_depois  # quantidade devolvida (excluir reverte)
+            passo('histórico: Default só exclui o que ele mesmo marcou como recebido, e a quantidade volta')
+
+            # Backup é exclusivo do Admin agora — o Default (joana) nem vê a aba no menu.
+            expect(pg.locator('.tab-btn[data-tab="backup"]')).to_be_hidden()
+            passo('Default não vê a aba Backup no menu')
+
+            pg.click('#btn-sair')
+            pg.click('#confirm-ok')
+            expect(pg.locator('#modal-login')).to_be_visible()
+            pg.fill('#login-usuario', 'gerente')
+            pg.fill('#login-senha', 'gerente1')
+            pg.click('#login-confirmar-btn')
+            expect(pg.locator('#modal-login')).to_be_hidden()
+
             pg.click('.tab-btn[data-tab="backup"]')
             expect(pg.locator('#btn-backup-exportar')).to_be_visible()
             expect(pg.locator('#btn-backup-importar')).to_be_visible()
-            expect(pg.locator('input[name="modo-importar"][value="mesclar"]')).to_be_hidden()
+            expect(pg.locator('input[name="modo-importar"][value="mesclar"]')).to_be_visible()  # Admin vê as duas opções
             pg.fill('#backup-importar-senha', 'backup123')
             pg.click('#btn-backup-importar')
             with pg.expect_file_chooser() as fc:
@@ -220,7 +347,7 @@ def main():
             pg.fill('#login-senha', 'senhaForte1')
             pg.click('#login-confirmar-btn')
             expect(pg.locator('#login-erro')).to_be_visible()
-            passo('importação total pelo Default: volta pro login e o Admin antigo não entra mais')
+            passo('importação total pelo Admin: volta pro login e o Admin antigo não entra mais')
 
             # Sessão que perdeu a validade no meio do uso → volta pro login sozinha.
             pg.fill('#login-usuario', 'joana')

@@ -146,6 +146,77 @@ const arq = (nome) => path.join(stub.pastaUserData, nome);
   await chamar('auth:logout');
   assert.strictEqual((await chamar('auth:login', { usuario: 'joao', senha: 'nova123' })).perfil, 'default');
 
+  // Backup é exclusivo do Admin agora — o Default nem pode exportar nem importar (em nenhum modo).
+  assert.strictEqual((await chamar('backup:exportar', { senha: 'bkp1234' })).ok, false);
+  assert.strictEqual((await chamar('backup:importar', { senha: 'bkp1234', modo: 'total' })).ok, false);
+
+  // Histórico: Default só pode selecionar/excluir movimentações que ele mesmo marcou como
+  // "📝 Marcar como recebido" — nunca uma pendente que ele não marcou, nem o histórico inteiro.
+  assert.strictEqual((await chamar('historico:excluirSelecionados', [itemId])).ok, false); // nem marcada
+  const movDefault = await chamar('items:adjust', { itemId, tipo: 'saida', quantidade: 1, usuarioId, tipoEntrega: 'retirada' });
+  assert.strictEqual(movDefault.ok, true);
+  const transacaoDefaultId = movDefault.transacao.id;
+  assert.strictEqual((await chamar('historico:excluirSelecionados', [transacaoDefaultId])).ok, false); // pendente, mas ainda não marcada
+  assert.strictEqual((await chamar('historico:marcarRecebidoDefault', { transacaoId: transacaoDefaultId, marcado: true })).ok, true);
+  const excluiuMarcada = await chamar('historico:excluirSelecionados', [transacaoDefaultId]);
+  assert.strictEqual(excluiuMarcada.ok, true);
+  assert.strictEqual((await chamar('historico:excluirTudo')).ok, false); // isso continua exclusivo do Admin
+
+  // "Pagamento geral" (exclusivo do Admin): compara com a soma da coluna "✓ Já pago"
+  // (`pendencias:listarQuitados`), não com o total geral do sistema. Usuário "Fulano" fica
+  // quitado com R$30 (base da comparação); "Ezio" tem uma pendência separada, ainda em aberto.
+  await chamar('auth:logout');
+  assert.strictEqual((await chamar('auth:login', { usuario: 'admin', senha: 'segredo1' })).ok, true);
+  // Reabastece o estoque pra garantir quantidade suficiente pras saídas abaixo, independente do
+  // que sobrou das movimentações anteriores neste teste.
+  assert.strictEqual((await chamar('items:adjust', { itemId, tipo: 'entrada', quantidade: 100 })).ok, true);
+  const rFulano = await chamar('usuarios:add', { nome: 'Fulano', telefone: '27900008888' });
+  assert.strictEqual(rFulano.ok, true);
+  const movFulano = await chamar('items:adjust', {
+    itemId, tipo: 'saida', quantidade: 3, usuarioId: rFulano.usuario.id, tipoEntrega: 'retirada', pendente: true,
+  });
+  assert.strictEqual(movFulano.ok, true);
+  const fulanoAntes = await chamar('pendencias:detalharUsuario', rFulano.usuario.id);
+  assert.ok(fulanoAntes.totalPendente > 0);
+  assert.strictEqual((await chamar('pagamentos:adicionar', { usuarioId: rFulano.usuario.id, valor: fulanoAntes.totalPendente, observacao: 'Pagou tudo' })).ok, true);
+  assert.strictEqual((await chamar('pendencias:detalharUsuario', rFulano.usuario.id)).totalPendente, 0);
+  assert.ok((await chamar('pendencias:listarQuitados')).some((u) => u.usuarioId === rFulano.usuario.id));
+
+  const rEzio = await chamar('usuarios:add', { nome: 'Ezio', telefone: '27900009999' });
+  assert.strictEqual(rEzio.ok, true);
+  await chamar('items:adjust', {
+    itemId, tipo: 'saida', quantidade: 20, usuarioId: rEzio.usuario.id, tipoEntrega: 'retirada', pendente: true,
+  });
+  const ezioAntes = await chamar('pendencias:detalharUsuario', rEzio.usuario.id);
+  assert.ok(ezioAntes.totalPendente > 0);
+
+  const quitadosAntes = await chamar('pendencias:listarQuitados');
+  const baseJaPagoAntes = quitadosAntes.reduce((soma, u) => soma + u.totalPago, 0);
+  const valorQueCobreESobra = baseJaPagoAntes + 1; // 1 real de excedente
+  const geral = await chamar('pendencias:pagamentoGeral', { valor: valorQueCobreESobra });
+  assert.strictEqual(geral.ok, true);
+  assert.strictEqual(geral.baseJaPago, baseJaPagoAntes);
+  assert.strictEqual(geral.sobra, 1);
+  assert.strictEqual(geral.usuariosZerados, quitadosAntes.length);
+  const ezioDepois = await chamar('pendencias:detalharUsuario', rEzio.usuario.id);
+  assert.strictEqual(ezioDepois.totalPendente, ezioAntes.totalPendente - 1);
+  // "Zera o lado dos pagos": o Fulano é removido por completo — pagamento apagado E pendência de
+  // origem resolvida — não some só de "✓ Já pago", some de "Pendentes" também.
+  const fulanoDepois = await chamar('pendencias:detalharUsuario', rFulano.usuario.id);
+  assert.strictEqual(fulanoDepois.totalPagamentos, 0);
+  assert.strictEqual(fulanoDepois.totalPendencias, 0);
+  assert.strictEqual(fulanoDepois.totalPendente, 0);
+  assert.ok(!(await chamar('pendencias:listarQuitados')).some((u) => u.usuarioId === rFulano.usuario.id));
+  assert.ok(!(await chamar('pendencias:listarUsuarios')).some((u) => u.usuarioId === rFulano.usuario.id));
+
+  // Agora não há mais ninguém em "✓ Já pago" (base = 0) — valor MENOR que a base não existe
+  // (qualquer valor positivo > 0), então lança o valor informado inteiro pro "ezio".
+  const menorGeral = await chamar('pendencias:pagamentoGeral', { valor: 0.01 });
+  assert.strictEqual(menorGeral.ok, true);
+  assert.strictEqual(menorGeral.sobra, 0.01);
+  assert.strictEqual(menorGeral.baseJaPago, 0);
+  assert.strictEqual(menorGeral.usuariosZerados, 0);
+
   // Importação total: zera o Admin, desloga e não reabre o primeiro acesso.
   stub.proximoAbrir = arq('b.estoquebkp');
   const imp = await chamar('backup:importar', { senha: 'bkp1234', modo: 'total' });

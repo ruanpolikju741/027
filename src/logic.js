@@ -839,10 +839,12 @@ function excluirTodoHistorico(data) {
 }
 
 /**
- * Remove só as movimentações selecionadas (pelos ids), mantendo o restante
- * do histórico intacto (ação exclusiva do Admin). Mesma regra de
- * `excluirTodoHistorico`: a quantidade de cada uma é devolvida ao item
- * correspondente antes do registro sumir do histórico.
+ * Remove só as movimentações selecionadas (pelos ids), mantendo o restante do histórico intacto.
+ * Mesma regra de `excluirTodoHistorico`: a quantidade de cada uma é devolvida ao item
+ * correspondente antes do registro sumir do histórico. O Admin pode selecionar qualquer
+ * movimentação; o Default só pode chegar aqui com movimentações que ele mesmo marcou como
+ * "📝 Marcar como recebido" (ver `marcarRecebidoDefaultTransacao`) — a checagem de quem pode
+ * selecionar o quê é feita em handlers.js, não aqui.
  */
 function excluirTransacoes(data, idsTransacoes) {
   const idsValidos = new Set(Array.isArray(idsTransacoes) ? idsTransacoes.filter(Boolean) : []);
@@ -1355,6 +1357,100 @@ function quitarPendenciaUsuario(data, usuarioId, comentario) {
     observacao: (comentario && String(comentario).trim()) || 'Quitação total via aba Pendências',
     perfil: 'admin',
   });
+}
+
+/**
+ * "Pagamento geral" (ação exclusiva do Admin — checagem de perfil feita em handlers.js): recebe
+ * um valor total (ex.: o caixa do dia) pra reconciliar com a coluna "✓ Já pago" da aba Pendências
+ * (ver `listarUsuariosQuitados` — usuários com saldo quitado), não com o card "Total já pago
+ * (geral)" do topo (que soma também pagamentos parciais de quem ainda está pendente).
+ *
+ * `baseJaPago` = soma do "totalPago" de todo mundo que está em "✓ Já pago" no momento. A ação:
+ * 1. Lança um pagamento comum (ver `adicionarPagamento`) pro usuário cadastrado com o nome "ezio"
+ *    (um usuário comum do catálogo de usuários — NÃO é uma conta de login —, usado aqui como
+ *    "caixa" desse lançamento):
+ *    - Se o valor informado for MAIOR que `baseJaPago`, só o EXCEDENTE (valor informado menos
+ *      `baseJaPago`) vira pagamento pro "ezio" — ex.: "Já pago" = R$ 200, valor informado R$ 500
+ *      → sobra R$ 300, lançada como pagamento de R$ 300 (abatendo a pendência do ezio em R$ 300).
+ *    - Se o valor informado for MENOR que `baseJaPago`, o valor informado inteiro vira pagamento
+ *      pro "ezio".
+ *    - Se o valor informado for EXATAMENTE igual a `baseJaPago`, não há excedente nenhum pra
+ *      lançar, e a ação é rejeitada (nada é lançado, nada é removido).
+ * 2. "Zera o lado dos pagos": remove de vez TODOS os pagamentos de quem estava em "✓ Já pago" —
+ *    esse dinheiro já está contabilizado no valor informado aqui, então não fica duplicado no
+ *    sistema — E também resolve de vez as pendências de origem desses usuários (sem criar
+ *    nenhum outro pagamento pra eles), já que esse dinheiro já foi pago e recebido de verdade.
+ *    Diferente de só apagar o pagamento (que faria a pendência original reaparecer), aqui o
+ *    usuário some de vez tanto da coluna "✓ Já pago" quanto da lista de "Pendentes".
+ */
+function registrarPagamentoGeral(data, valorInformado) {
+  const valor = Number(valorInformado);
+  if (!Number.isFinite(valor) || valor <= 0) {
+    return { ok: false, erro: 'Informe um valor de pagamento válido (maior que zero).' };
+  }
+  const valorArred = arredondarValor(valor);
+  const quitados = listarUsuariosQuitados(data);
+  const baseJaPago = arredondarValor(quitados.reduce((soma, u) => soma + u.totalPago, 0));
+
+  let valorPagamento;
+  let excedente;
+  if (valorArred > baseJaPago) {
+    valorPagamento = arredondarValor(valorArred - baseJaPago);
+    excedente = true;
+  } else if (valorArred === baseJaPago) {
+    return {
+      ok: false,
+      erro: 'O valor informado é igual à soma da coluna "✓ Já pago" — não há excedente para lançar no "ezio".',
+    };
+  } else {
+    valorPagamento = valorArred;
+    excedente = false;
+  }
+
+  const ezio = data.usuarios.find((u) => String(u.nome || '').trim().toLowerCase() === 'ezio');
+  if (!ezio) {
+    return {
+      ok: false,
+      erro:
+        'Não existe um usuário chamado "ezio" cadastrado. Cadastre-o na aba Usuários (com esse nome, ' +
+        'sem precisar de login) antes de usar o pagamento geral.',
+    };
+  }
+
+  // "Zera o lado dos pagos": remove os pagamentos de todo mundo que estava em "✓ Já pago" antes
+  // dessa ação — esse valor já entrou na conta acima, não fica contado duas vezes — e resolve de
+  // vez as pendências de origem desses usuários (sem lançar nenhum pagamento novo pra eles), já
+  // que esse dinheiro já foi pago e recebido. Assim eles somem de vez tanto de "✓ Já pago" quanto
+  // de "Pendentes", em vez de voltar a aparecer como se devessem de novo.
+  const idsQuitados = new Set(quitados.map((u) => u.usuarioId));
+  const novo = clonar(data);
+  if (idsQuitados.size > 0) {
+    novo.pagamentos = (novo.pagamentos || []).filter((p) => !idsQuitados.has(p.usuarioId));
+    novo.transacoes = (novo.transacoes || []).map((t) => {
+      if (idsQuitados.has(t.usuarioId) && t.tipo === 'saida' && t.pendente) {
+        return { ...t, pendente: false, marcadoRecebidoDefault: false };
+      }
+      return t;
+    });
+    novo.lancamentos = (novo.lancamentos || []).map((l) => {
+      if (idsQuitados.has(l.usuarioId) && l.pendente) {
+        return { ...l, pendente: false, marcadoRecebidoDefault: false };
+      }
+      return l;
+    });
+  }
+
+  const observacao = excedente
+    ? `Pagamento geral — excedente sobre a coluna "Já pago" (valor informado: R$ ${valorArred.toFixed(2)})`
+    : `Pagamento geral (valor informado: R$ ${valorArred.toFixed(2)})`;
+  const res = adicionarPagamento(novo, {
+    usuarioId: ezio.id,
+    valor: valorPagamento,
+    observacao,
+    perfil: 'admin',
+  });
+  if (!res.ok) return res;
+  return { ...res, sobra: valorPagamento, baseJaPago, valorInformado: valorArred, usuariosZerados: quitados.length };
 }
 
 // ---------- Relatório de pedidos em PDF ----------
@@ -1936,6 +2032,7 @@ module.exports = {
   listarUsuariosQuitados,
   totalizarPendencias,
   quitarPendenciaUsuario,
+  registrarPagamentoGeral,
   listarPedidosParaRelatorio,
   listarQuantidadesAtuaisParaRelatorio,
 };

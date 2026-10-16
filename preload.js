@@ -102,6 +102,7 @@ contextBridge.exposeInMainWorld('api', {
     quitarUsuario: (usuarioId, comentario) =>
       ipcRenderer.invoke('pendencias:quitarUsuario', { usuarioId, comentario }),
     totalizar: () => ipcRenderer.invoke('pendencias:totalizar'),
+    pagamentoGeral: (valor) => ipcRenderer.invoke('pendencias:pagamentoGeral', { valor }),
   },
   consulta: {
     porUsuario: (usuarioId, dataInicio, dataFim) =>

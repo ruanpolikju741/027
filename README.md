@@ -537,15 +537,19 @@ pros registros daquele usuário, em cima do período já selecionado. O "×" que
 aparece dentro da caixa (ou escolher "Todos os usuários" na lista de
 sugestões) limpa o filtro e volta a mostrar todo mundo.
 
-Como Admin, essa aba também mostra uma caixinha de marcação em cada linha
-(dentro do período mostrado) e dois botões: **"Excluir selecionadas"** (as
-marcadas) e **"Excluir todo o histórico…"** (todas as movimentações, de
-todos os dias, independente do filtro de período aplicado na tela). Em
-ambos os casos, isso **devolve a quantidade** de cada movimentação removida
-pro item correspondente — uma saída volta a somar, uma entrada volta a
-subtrair —, igual ao "Desfazer" do Default; a única exceção é quando o item
-já não existe mais no catálogo, caso em que só o registro some (não há mais
-onde devolver a quantidade).
+Essa aba também mostra uma caixinha de marcação em cada linha (dentro do
+período mostrado) e o botão **"Excluir selecionadas"** (as marcadas). O
+**Admin** pode marcar e excluir qualquer movimentação; o **Default** só
+consegue marcar (e excluir) as que ele mesmo marcou antes como **"📝 Marcar
+como recebido"** (ver "Status — Pendente ou Concluído" mais abaixo) — nas
+demais linhas nem aparece a caixinha de marcação pra ele. O botão **"Excluir
+todo o histórico…"** (todas as movimentações, de todos os dias, de uma vez,
+independente do filtro de período aplicado na tela) continua exclusivo do
+Admin. Em qualquer dos casos, excluir **devolve a quantidade** da
+movimentação removida pro item correspondente — uma saída volta a somar, uma
+entrada volta a subtrair —, igual ao "Desfazer" do Default; a única exceção
+é quando o item já não existe mais no catálogo, caso em que só o registro
+some (não há mais onde devolver a quantidade).
 
 Logo abaixo da tabela de movimentações, uma **segunda tabela** mostra os
 **lançamentos avulsos e pagamentos** do mesmo período selecionado (ver
@@ -803,6 +807,48 @@ por pagamentos (os dois números respondem perguntas diferentes: um é "quanto
 esse item tem pendente no total", o outro é "quanto esse usuário ainda deve,
 descontando o que ele já pagou").
 
+### Pagamento geral (exclusivo do Admin)
+
+No topo da aba Pendências, abaixo dos três cartões de resumo geral, o Admin
+tem um botão **"💰 Pagamento geral"** com um campo de valor ao lado. Serve
+pra lançar um valor recebido de uma vez (ex.: o caixa do dia) sem precisar
+lançar pagamento usuário por usuário — o Admin só digita o valor total
+recebido, e o sistema lança isso como um **pagamento comum** (ver "Registrar
+um pagamento" acima) para um usuário específico, cadastrado com o nome
+**"ezio"** (um usuário comum do catálogo de usuários — cadastrado como
+qualquer outro na aba "Usuários", **não** é uma conta de login). Se não
+existir um usuário chamado "ezio", a ação é rejeitada até que ele seja
+cadastrado.
+
+**Importante:** a comparação NÃO usa o cartão "Total já pago (geral)" do
+topo (esse soma também pagamentos parciais de quem ainda está pendente) — usa
+a soma da coluna **"✓ Já pago"** (a segunda coluna da aba, com quem já está
+com o saldo quitado).
+
+O valor lançado pro "ezio" depende de como o valor informado se compara a
+essa soma:
+- Se o valor informado for **menor** que a soma da coluna "✓ Já pago" — o
+  valor informado **inteiro** é lançado como pagamento pro "ezio". Ex.: "✓ Já
+  pago" soma R$ 200 (um usuário, Beraht), Admin informa R$ 500 → lança
+  R$ 500 de pagamento pro "ezio".
+- Se o valor informado for **maior** que essa soma — só a **diferença**
+  (valor informado menos a soma da coluna "✓ Já pago") é lançada pro "ezio",
+  não o valor cheio. Ex.: "✓ Já pago" soma R$ 200, Admin informa R$ 500 →
+  sobra R$ 300 (500 − 200), lançado como pagamento de R$ 300 pro "ezio".
+- Se o valor informado for **exatamente igual** a essa soma, não há
+  excedente nenhum pra lançar e a ação é rejeitada.
+
+Nos dois primeiros casos (ação executada), além de lançar o pagamento pro
+"ezio", a ação **remove por completo todo mundo que estava na coluna
+"✓ Já pago"** — tanto o registro de pagamento quanto a pendência de origem
+(sem lançar nenhum outro pagamento pra eles). Esse dinheiro já foi contado no
+valor informado e já foi recebido de verdade, então esses usuários **somem de
+vez tanto de "✓ Já pago" quanto de "Pendentes"** — não voltam a aparecer
+devendo nada.
+
+Pede confirmação antes (mostrando o valor que será lançado) e não pode ser
+desfeito.
+
 ### Marcar uma pendência específica como recebida (exclusivo do Admin)
 
 Cada linha de **"O que está pendente"**, no detalhamento de um usuário, tem
@@ -933,8 +979,9 @@ normalmente.
 
 ## Backup (Import/Export)
 
-Na aba **"Backup"**:
-- **Exportar** (Default e Admin): gera um arquivo `.estoquebkp` com todo o
+A aba **"Backup"** é **exclusiva do Admin** — o Default nem vê essa aba no
+menu:
+- **Exportar**: gera um arquivo `.estoquebkp` com todo o
   catálogo (nome, quantidade, valor unitário e a foto/vídeo de cada item),
   usuários, histórico, lançamentos avulsos, pagamentos e as **contas de
   login do Default** (usuário e senha, do jeito que estão — ver
@@ -946,14 +993,11 @@ Na aba **"Backup"**:
   símbolos, com no mínimo 6 caracteres**; essa senha é pedida de volta para
   importar. É esse arquivo que você usa para guardar uma cópia de segurança
   ou migrar os dados para outro computador.
-- **Importar** (Default e Admin): escolhe um arquivo `.estoquebkp` exportado
-  antes, a senha usada na exportação e um dos dois modos abaixo — mas
-  **"Mesclar" é exclusivo do Admin**: o Default só pode escolher
-  "Substituir tudo" (o botão de mesclar nem aparece pra ele). O arquivo de
-  backup nunca carrega o login do Admin, em nenhum dos dois modos — mas veja
-  a exceção importante do modo "Substituir tudo" logo abaixo: esse modo
-  **reinicia** o login do Admin desta máquina, mesmo o arquivo não trazendo
-  nenhum.
+- **Importar**: escolhe um arquivo `.estoquebkp` exportado antes, a senha
+  usada na exportação e um dos dois modos abaixo. O arquivo de backup nunca
+  carrega o login do Admin, em nenhum dos dois modos — mas veja a exceção
+  importante do modo "Substituir tudo" logo abaixo: esse modo **reinicia**
+  o login do Admin desta máquina, mesmo o arquivo não trazendo nenhum.
 
   **Depois de qualquer importação bem-sucedida** (substituir tudo ou
   mesclar, tanto faz), o app **desloga automaticamente e volta pra tela de
@@ -978,15 +1022,15 @@ Na aba **"Backup"**:
   arquivo ficar "atrás" de um Admin antigo local pra sempre (o Admin é
   sempre checado primeiro na hora de logar — ver `verificarLogin`).
   **Depois da importação, o app volta pra tela de login NORMAL — nunca pra
-  tela de criar um novo Admin.** Isso é proposital, por segurança: como
-  qualquer perfil (inclusive Default) pode fazer essa importação, deixar um
-  assistente de "criar Admin" aparecer logo depois dela permitiria que
-  qualquer pessoa virasse Admin desta máquina só de importar um arquivo
-  qualquer. Na prática, então, depois de um "substituir tudo" **não sobra
-  nenhum Admin configurado nesta máquina** — só as contas de login do
-  Default trazidas pelo arquivo conseguem entrar; não existe hoje uma tela
-  para recriar um Admin nessa situação (a única forma é apagar os dados
-  locais desta instalação e passar pelo primeiro acesso de novo).
+  tela de criar um novo Admin.** Isso é proposital, por segurança: mesmo
+  sendo hoje uma ação exclusiva do Admin, deixar um assistente de "criar
+  Admin" aparecer logo depois de um "substituir tudo" seria arriscado demais
+  (por exemplo, se o arquivo importado vier de outra instalação). Na
+  prática, então, depois de um "substituir tudo" **não sobra nenhum Admin
+  configurado nesta máquina** — só as contas de login do Default trazidas
+  pelo arquivo conseguem entrar; não existe hoje uma tela para recriar um
+  Admin nessa situação (a única forma é apagar os dados locais desta
+  instalação e passar pelo primeiro acesso de novo).
 - **Mesclar com o que já existe** (exclusivo do Admin): em vez de apagar,
   soma ao que já está aqui só o que for **novo ou diferente** — o que já
   existe dos dois lados se mantém como está, sem duplicar e sem "cancelar"

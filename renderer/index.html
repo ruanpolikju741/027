@@ -34,7 +34,7 @@
       <button class="tab-btn" data-tab="consultar">Consultar</button>
       <button class="tab-btn" data-tab="pendencias">Pendências</button>
       <button class="tab-btn" data-tab="precificacao">Precificação</button>
-      <button class="tab-btn" data-tab="backup">Backup</button>
+      <button class="tab-btn admin-only hidden" data-tab="backup">Backup</button>
       <button class="tab-btn admin-only hidden" data-tab="contas-login">Contas de login</button>
     </nav>
 
@@ -101,11 +101,11 @@
           </label>
           <button id="btn-abrir-relatorio-pdf" class="btn btn-outline btn-pequeno">📄 Gerar PDF de pedidos…</button>
         </div>
-        <div class="toolbar admin-only hidden">
+        <div class="toolbar">
           <button id="btn-historico-excluir-selecionados" class="btn btn-outline btn-pequeno" disabled>
             Excluir selecionadas
           </button>
-          <button id="btn-historico-excluir-tudo" class="btn btn-perigo btn-pequeno">
+          <button id="btn-historico-excluir-tudo" class="btn btn-perigo btn-pequeno admin-only hidden">
             Excluir todo o histórico…
           </button>
         </div>
@@ -114,11 +114,16 @@
           saída volta a somar, uma entrada volta a subtrair) — exceto se o item já não existir mais no
           catálogo, caso em que só o registro some.
         </p>
+        <p class="dica-pequena default-only">
+          O perfil Default só pode selecionar e excluir movimentações que ele mesmo marcou como
+          "📝 Marcar como recebido" — não dá pra excluir o histórico inteiro de uma vez (isso é exclusivo
+          do Admin). Excluir também devolve a quantidade da movimentação pro item correspondente.
+        </p>
         <div id="historico-vazio" class="vazio hidden">Nenhuma movimentação registrada ainda.</div>
         <table class="tabela" id="historico-table">
           <thead>
             <tr>
-              <th class="col-historico-check admin-only hidden">
+              <th class="col-historico-check">
                 <input type="checkbox" id="historico-marcar-todas" title="Selecionar todas" />
               </th>
               <th>Data/Hora</th><th>Item</th><th>Movimentação</th><th>Qtd. resultante</th>
@@ -244,6 +249,22 @@
             <span class="precificacao-total-label">Saldo pendente (geral)</span>
             <span class="precificacao-total-valor" id="pendencias-geral-saldo">R$ 0,00</span>
           </div>
+        </div>
+
+        <div class="pendencias-geral-pagamento admin-only hidden" id="pendencias-geral-pagamento-wrap">
+          <p class="dica-pequena">
+            Informe o valor total recebido (ex.: o caixa do dia). Ele é comparado com a soma da
+            coluna "✓ Já pago" (não com os cartões acima): se não cobrir, o valor inteiro vira
+            pagamento pro usuário "ezio"; se cobrir e sobrar, só o excedente vira pagamento. Nos
+            dois casos, quem estava em "✓ Já pago" é removido por completo do sistema (pagamento
+            e pendência de origem) — esse valor já foi contado aqui, e esse pagamento já foi
+            recebido de verdade, então eles não voltam a aparecer em lugar nenhum.
+          </p>
+          <div class="toolbar">
+            <input id="pendencias-pagamento-geral-valor" type="number" min="0.01" step="0.01" placeholder="Valor total recebido (R$)" />
+            <button id="btn-pendencias-pagamento-geral" class="btn btn-outline btn-pequeno">💰 Pagamento geral</button>
+          </div>
+          <p class="erro hidden" id="pendencias-pagamento-geral-erro"></p>
         </div>
 
         <div class="pendencias-colunas">
@@ -383,11 +404,7 @@
         <div class="backup-bloco">
           <h3>Importar backup</h3>
           <p class="dica">
-            Disponível para os perfis Default e Admin, mas <strong>mesclar</strong> é exclusivo do
-            Admin — o Default só pode <strong>substituir tudo</strong>.
-            <span class="admin-only hidden">Escolha como aplicar o arquivo:</span>
-            <span class="default-only">O app volta pra tela de login depois de importar, já com as
-              contas de login que vieram no arquivo.</span>
+            Disponível só para o Admin. Escolha como aplicar o arquivo:
           </p>
 
           <div class="modo-importar-opcoes">
@@ -399,7 +416,7 @@
                   exatamente o que está no arquivo. Essa ação não pode ser desfeita.</span>
               </span>
             </label>
-            <label class="modo-importar-opcao admin-only hidden">
+            <label class="modo-importar-opcao">
               <input type="radio" name="modo-importar" value="mesclar" />
               <span>
                 <strong>Mesclar com o que já existe</strong>
