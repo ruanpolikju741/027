@@ -62,6 +62,19 @@ function clonar(data) {
 
 // ---------- Autenticação ----------
 
+/**
+ * Salt+hash "isca" fixos, gerados uma única vez no carregamento do módulo com a MESMA função
+ * de hash usada nas senhas reais (`hashSenha`, scrypt) — nunca autenticam ninguém de verdade.
+ * `verificarLogin` sempre roda uma comparação contra eles quando o usuário informado não existe,
+ * e descarta o resultado, pra pagar exatamente o mesmo custo computacional de quando existe.
+ * Sem isso, um atacante conseguiria descobrir nomes de usuário válidos só medindo o tempo de
+ * resposta do login (mais rápido quando não existe ninguém pra comparar a senha). Não usa
+ * setTimeout/atraso artificial de propósito: um atraso fixo mascara a diferença, mas não a
+ * elimina (e pode ser descontado por quem está medindo); igualar o custo real, sim.
+ */
+const SALT_LOGIN_INEXISTENTE = gerarSalt();
+const HASH_LOGIN_INEXISTENTE = hashSenha('senha-isca-custo-constante-login-inexistente', SALT_LOGIN_INEXISTENTE);
+
 function verificarLoginAdmin(data, usuario, senha) {
   if (!data.admin) return false;
   if (String(usuario).trim() !== data.admin.usuario) return false;
@@ -276,21 +289,41 @@ function resetarSenhaContaLogin(data, contaId, novaSenha) {
  */
 function verificarLogin(data, usuario, senha) {
   const usuarioLimpo = String(usuario || '').trim();
-  if (verificarLoginAdmin(data, usuarioLimpo, senha)) {
+  const senhaInformada = String(senha || '');
+
+  // Decide ANTES de comparar qual conta (se alguma) o nome de usuário informado bate com — mas a
+  // comparação de hash em si roda sempre, exatamente uma vez, mesmo quando não bate com nada (ver
+  // SALT_LOGIN_INEXISTENTE/HASH_LOGIN_INEXISTENTE acima). Isso garante o mesmo custo computacional
+  // nos dois casos, pra não dar pra descobrir usuários válidos só pelo tempo de resposta.
+  let alvo = null; // { tipo: 'admin' } | { tipo: 'default', conta }
+  if (data.admin && usuarioLimpo === data.admin.usuario) {
+    alvo = { tipo: 'admin', salt: data.admin.salt, hash: data.admin.hashSenha };
+  } else {
+    const conta = (data.contasLogin || []).find((c) => c.usuario === usuarioLimpo);
+    if (conta) alvo = { tipo: 'default', conta, salt: conta.salt, hash: conta.hashSenha };
+  }
+
+  const senhaCorreta = alvo
+    ? verificarSenha(senhaInformada, alvo.salt, alvo.hash)
+    : verificarSenha(senhaInformada, SALT_LOGIN_INEXISTENTE, HASH_LOGIN_INEXISTENTE) && false; // descarta: nunca autentica
+
+  // Mesma mensagem genérica nos dois casos (usuário não existe OU senha errada) — nunca revela
+  // qual dos dois foi.
+  if (!alvo || !senhaCorreta) {
+    return { ok: false, erro: 'Usuário ou senha inválidos.' };
+  }
+  if (alvo.tipo === 'admin') {
     return { ok: true, tipo: 'admin' };
   }
-  const conta = (data.contasLogin || []).find((c) => c.usuario === usuarioLimpo);
-  if (conta && verificarSenha(String(senha || ''), conta.salt, conta.hashSenha)) {
-    return {
-      ok: true,
-      tipo: 'default',
-      contaId: conta.id,
-      usuario: conta.usuario,
-      admin: !!conta.admin, // conta com acesso de Admin (ver `definirAdminContaLogin`)
-      precisaTrocarSenha: !!conta.precisaTrocarSenha,
-    };
-  }
-  return { ok: false, erro: 'Usuário ou senha inválidos.' };
+  const conta = alvo.conta;
+  return {
+    ok: true,
+    tipo: 'default',
+    contaId: conta.id,
+    usuario: conta.usuario,
+    admin: !!conta.admin, // conta com acesso de Admin (ver `definirAdminContaLogin`)
+    precisaTrocarSenha: !!conta.precisaTrocarSenha,
+  };
 }
 
 /**
@@ -320,6 +353,39 @@ function trocarSenhaContaLogin(data, contaId, { senhaAtual, novaSenha } = {}) {
 
 // ---------- Itens do catálogo ----------
 
+// Tipos de mídia aceitos num data URL de foto/vídeo — a mesma whitelist já usada ao separar
+// mídias do estado na versão web (ver RE_TIPO_IMAGEM/RE_TIPO_VIDEO em web/repositorio.js):
+// imagens comuns e qualquer vídeo, nunca SVG/HTML/XML (podem conter script se abertos direto).
+const RE_FOTO_DATA_URL = /^data:(image\/(?:jpeg|png|webp|gif|bmp|avif|heic|heif)|video\/[a-z0-9.+-]+);base64,[A-Za-z0-9+/]+=*$/i;
+// Referência interna de mídia já processada e gravada por um servidor web (ver `urlDaMidia` em
+// web/repositorio.js) — só o hash em hexadecimal, nunca texto vindo direto do cliente, por isso é
+// seguro aceitar de volta quando um item é editado sem trocar a foto.
+const RE_FOTO_URL_MIDIA_INTERNA = /^\/api\/midia\/[0-9a-f]{64}(\?tipo=video)?$/;
+
+/**
+ * Valida o campo "foto" de um item/movimentação antes de salvar. Só aceita: um data URL de
+ * imagem/vídeo com tipo MIME permitido (`RE_FOTO_DATA_URL`); uma URL http(s) absoluta e bem
+ * formada (via o construtor nativo `URL`); ou a referência interna de mídia da versão web
+ * (`RE_FOTO_URL_MIDIA_INTERNA`). Qualquer outro valor — texto arbitrário, SVG, uma tentativa de
+ * fechar o atributo `src` com aspas/`<`/`>`, etc. — é recusado aqui, antes de chegar perto de um
+ * `innerHTML` na interface (ver também o escapeHtml do campo "foto" em renderer/app.js, como
+ * segunda camada de defesa).
+ */
+function validarFoto(foto) {
+  if (foto === null || foto === undefined || foto === '') return { ok: true, valor: null };
+  const texto = String(foto);
+  if (RE_FOTO_DATA_URL.test(texto) || RE_FOTO_URL_MIDIA_INTERNA.test(texto)) {
+    return { ok: true, valor: texto };
+  }
+  try {
+    const url = new URL(texto);
+    if (url.protocol === 'http:' || url.protocol === 'https:') return { ok: true, valor: texto };
+  } catch (_erro) {
+    // Não é uma URL absoluta válida — cai na recusa abaixo.
+  }
+  return { ok: false, erro: 'Foto/vídeo em formato inválido.' };
+}
+
 function listarItens(data) {
   return clonar(data.items).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
 }
@@ -327,13 +393,15 @@ function listarItens(data) {
 function adicionarItem(data, { nome, foto, quantidade }) {
   const nomeLimpo = String(nome || '').trim();
   if (!nomeLimpo) return { ok: false, erro: 'Informe o nome do item.' };
+  const fotoValidada = validarFoto(foto);
+  if (!fotoValidada.ok) return fotoValidada;
   const qtdInicial = Number.isFinite(Number(quantidade)) ? Math.max(0, arredondarQuantidade(Number(quantidade))) : 0;
 
   const novo = clonar(data);
   const item = {
     id: gerarId('item'),
     nome: nomeLimpo,
-    foto: foto || null,
+    foto: fotoValidada.valor,
     quantidade: qtdInicial,
     precoUnitario: 0, // definido depois, só pelo admin, na aba "Precificação" (ver definirPrecoItem)
     criadoEm: new Date().toISOString(),
@@ -353,7 +421,9 @@ function editarItem(data, itemId, { nome, foto }) {
     item.nome = nomeLimpo;
   }
   if (foto !== undefined) {
-    item.foto = foto;
+    const fotoValidada = validarFoto(foto);
+    if (!fotoValidada.ok) return fotoValidada;
+    item.foto = fotoValidada.valor;
   }
   item.atualizadoEm = new Date().toISOString();
   return { ok: true, data: novo, item };
@@ -580,6 +650,8 @@ function ajustarQuantidade(data, params) {
   if (!Number.isFinite(quantidade) || quantidade <= 0) {
     return { ok: false, erro: 'Informe uma quantidade válida (maior que zero).' };
   }
+  const fotoValidada = validarFoto(foto);
+  if (!fotoValidada.ok) return fotoValidada;
 
   let novo = clonar(data);
   let item = novo.items.find((i) => i.id === itemId);
@@ -687,7 +759,7 @@ function ajustarQuantidade(data, params) {
     // continua livre pra escolher, como sempre.
     pendente: usuarioFinal ? (perfil === 'admin' ? !!pendente : true) : false,
     marcadoRecebidoDefault: false, // controle informal do Default (ver `marcarRecebidoDefaultTransacao`) — não afeta a pendência de verdade
-    foto: foto || null,
+    foto: fotoValidada.valor,
     perfil: perfil === 'admin' ? 'admin' : 'default',
     dataHoraISO: agora.toISOString(),
     dataDia: hojeISO(agora),
@@ -1361,27 +1433,33 @@ function quitarPendenciaUsuario(data, usuarioId, comentario) {
 
 /**
  * "Pagamento geral" (ação exclusiva do Admin — checagem de perfil feita em handlers.js): recebe
- * um valor total (ex.: o caixa do dia) pra reconciliar com a coluna "✓ Já pago" da aba Pendências
- * (ver `listarUsuariosQuitados` — usuários com saldo quitado), não com o card "Total já pago
- * (geral)" do topo (que soma também pagamentos parciais de quem ainda está pendente).
+ * um valor total (ex.: o caixa do dia) pra VALIDAR, um de cada vez, os usuários da coluna
+ * "✓ Já pago" (ver `listarUsuariosQuitados`) — e só manda o que sobrar pro usuário "ezio" quando
+ * TODOS eles tiverem sido validados (a coluna "✓ Já pago" fica vazia). Não compara com o card
+ * "Total já pago (geral)" do topo (que soma também pagamentos parciais de quem ainda está
+ * pendente) — só com a soma dos usuários de "✓ Já pago".
  *
- * `baseJaPago` = soma do "totalPago" de todo mundo que está em "✓ Já pago" no momento. A ação:
- * 1. Lança um pagamento comum (ver `adicionarPagamento`) pro usuário cadastrado com o nome "ezio"
- *    (um usuário comum do catálogo de usuários — NÃO é uma conta de login —, usado aqui como
- *    "caixa" desse lançamento):
- *    - Se o valor informado for MAIOR que `baseJaPago`, só o EXCEDENTE (valor informado menos
- *      `baseJaPago`) vira pagamento pro "ezio" — ex.: "Já pago" = R$ 200, valor informado R$ 500
- *      → sobra R$ 300, lançada como pagamento de R$ 300 (abatendo a pendência do ezio em R$ 300).
- *    - Se o valor informado for MENOR que `baseJaPago`, o valor informado inteiro vira pagamento
- *      pro "ezio".
- *    - Se o valor informado for EXATAMENTE igual a `baseJaPago`, não há excedente nenhum pra
- *      lançar, e a ação é rejeitada (nada é lançado, nada é removido).
- * 2. "Zera o lado dos pagos": remove de vez TODOS os pagamentos de quem estava em "✓ Já pago" —
- *    esse dinheiro já está contabilizado no valor informado aqui, então não fica duplicado no
- *    sistema — E também resolve de vez as pendências de origem desses usuários (sem criar
- *    nenhum outro pagamento pra eles), já que esse dinheiro já foi pago e recebido de verdade.
- *    Diferente de só apagar o pagamento (que faria a pendência original reaparecer), aqui o
- *    usuário some de vez tanto da coluna "✓ Já pago" quanto da lista de "Pendentes".
+ * Funcionamento:
+ * 1. "Validar" um usuário da coluna "✓ Já pago" = remover de vez o pagamento dele E resolver a
+ *    pendência de origem (sem lançar nenhum outro pagamento pra ele) — esse dinheiro já está
+ *    contabilizado no valor informado aqui, e já foi pago e recebido de verdade, então ele some
+ *    de vez tanto de "✓ Já pago" quanto de "Pendentes" (não volta a aparecer devendo nada).
+ * 2. O valor informado é consumido validando um usuário de cada vez, NA MESMA ORDEM da coluna
+ *    "✓ Já pago" (do maior pro menor saldo — ver `listarUsuariosQuitados`): se o que resta do
+ *    valor cobrir o saldo daquele usuário, ele é validado e esse saldo é descontado do valor
+ *    restante; senão, ele fica como está (continua em "✓ Já pago", com pagamento e pendência
+ *    intactos) e a validação segue tentando os próximos da lista.
+ * 3. "Essa modalidade vale só pro ezio, e só quando a coluna '✓ Já pago' fica vazia": only quando
+ *    TODOS os usuários da coluna forem validados é que o que sobrar do valor informado (se
+ *    houver) vira um pagamento comum (ver `adicionarPagamento`) pro usuário cadastrado com o
+ *    nome "ezio" (um usuário comum do catálogo — NÃO é uma conta de login —, usado aqui como
+ *    "caixa" desse excedente). Se faltar gente pra validar (o valor não dá pra cobrir todo mundo
+ *    da coluna), nada é lançado pro "ezio" dessa vez — o valor informado todo foi usado (ou ficou
+ *    parcialmente sem uso) só pra validar quem coube.
+ *    Ex.: "✓ Já pago" = Beraht R$200 + Fulano R$50 (total R$250), valor informado R$300 → os dois
+ *    são validados (consomem R$250) e sobram R$50 pro "ezio". Com valor informado R$220 → só o
+ *    Beraht é validado (R$200, maior saldo primeiro); sobram R$20, mas como o Fulano não coube,
+ *    nada vai pro "ezio" dessa vez (ele seria validado numa próxima rodada, já sem o Beraht).
  */
 function registrarPagamentoGeral(data, valorInformado) {
   const valor = Number(valorInformado);
@@ -1389,68 +1467,86 @@ function registrarPagamentoGeral(data, valorInformado) {
     return { ok: false, erro: 'Informe um valor de pagamento válido (maior que zero).' };
   }
   const valorArred = arredondarValor(valor);
-  const quitados = listarUsuariosQuitados(data);
+  const quitados = listarUsuariosQuitados(data); // ordem: maior pro menor saldo (mesma da coluna)
   const baseJaPago = arredondarValor(quitados.reduce((soma, u) => soma + u.totalPago, 0));
 
-  let valorPagamento;
-  let excedente;
-  if (valorArred > baseJaPago) {
-    valorPagamento = arredondarValor(valorArred - baseJaPago);
-    excedente = true;
-  } else if (valorArred === baseJaPago) {
-    return {
-      ok: false,
-      erro: 'O valor informado é igual à soma da coluna "✓ Já pago" — não há excedente para lançar no "ezio".',
-    };
-  } else {
-    valorPagamento = valorArred;
-    excedente = false;
+  // Só pode sobrar excedente pro "ezio" quando o valor informado dá pra cobrir TODO MUNDO da
+  // coluna "✓ Já pago" — por isso só exige o "ezio" cadastrado nesse caso (quando não há
+  // excedente possível, a ação nem chega a mexer nele).
+  const temExcedentePossivel = valorArred > baseJaPago;
+  let ezio = null;
+  if (temExcedentePossivel) {
+    ezio = data.usuarios.find((u) => String(u.nome || '').trim().toLowerCase() === 'ezio');
+    if (!ezio) {
+      return {
+        ok: false,
+        erro:
+          'Não existe um usuário chamado "ezio" cadastrado. Cadastre-o na aba Usuários (com esse nome, ' +
+          'sem precisar de login) antes de usar o pagamento geral.',
+      };
+    }
   }
 
-  const ezio = data.usuarios.find((u) => String(u.nome || '').trim().toLowerCase() === 'ezio');
-  if (!ezio) {
-    return {
-      ok: false,
-      erro:
-        'Não existe um usuário chamado "ezio" cadastrado. Cadastre-o na aba Usuários (com esse nome, ' +
-        'sem precisar de login) antes de usar o pagamento geral.',
-    };
+  // Consome o valor informado validando um usuário de cada vez, na ordem da coluna "✓ Já pago"
+  // (maior pro menor saldo): quem couber no que resta é validado; quem não couber fica como está
+  // e a tentativa segue pros próximos da lista (não para na primeira falha).
+  let valorRestante = valorArred;
+  const idsValidados = [];
+  for (const u of quitados) {
+    if (valorRestante >= u.totalPago) {
+      idsValidados.push(u.usuarioId);
+      valorRestante = arredondarValor(valorRestante - u.totalPago);
+    }
   }
+  const idsValidadosSet = new Set(idsValidados);
+  const todosValidados = idsValidados.length === quitados.length; // coluna "✓ Já pago" ficou vazia
 
-  // "Zera o lado dos pagos": remove os pagamentos de todo mundo que estava em "✓ Já pago" antes
-  // dessa ação — esse valor já entrou na conta acima, não fica contado duas vezes — e resolve de
-  // vez as pendências de origem desses usuários (sem lançar nenhum pagamento novo pra eles), já
-  // que esse dinheiro já foi pago e recebido. Assim eles somem de vez tanto de "✓ Já pago" quanto
-  // de "Pendentes", em vez de voltar a aparecer como se devessem de novo.
-  const idsQuitados = new Set(quitados.map((u) => u.usuarioId));
   const novo = clonar(data);
-  if (idsQuitados.size > 0) {
-    novo.pagamentos = (novo.pagamentos || []).filter((p) => !idsQuitados.has(p.usuarioId));
+  if (idsValidadosSet.size > 0) {
+    novo.pagamentos = (novo.pagamentos || []).filter((p) => !idsValidadosSet.has(p.usuarioId));
     novo.transacoes = (novo.transacoes || []).map((t) => {
-      if (idsQuitados.has(t.usuarioId) && t.tipo === 'saida' && t.pendente) {
+      if (idsValidadosSet.has(t.usuarioId) && t.tipo === 'saida' && t.pendente) {
         return { ...t, pendente: false, marcadoRecebidoDefault: false };
       }
       return t;
     });
     novo.lancamentos = (novo.lancamentos || []).map((l) => {
-      if (idsQuitados.has(l.usuarioId) && l.pendente) {
+      if (idsValidadosSet.has(l.usuarioId) && l.pendente) {
         return { ...l, pendente: false, marcadoRecebidoDefault: false };
       }
       return l;
     });
   }
 
-  const observacao = excedente
-    ? `Pagamento geral — excedente sobre a coluna "Já pago" (valor informado: R$ ${valorArred.toFixed(2)})`
-    : `Pagamento geral (valor informado: R$ ${valorArred.toFixed(2)})`;
-  const res = adicionarPagamento(novo, {
-    usuarioId: ezio.id,
-    valor: valorPagamento,
-    observacao,
-    perfil: 'admin',
-  });
-  if (!res.ok) return res;
-  return { ...res, sobra: valorPagamento, baseJaPago, valorInformado: valorArred, usuariosZerados: quitados.length };
+  // Só sobra algo pro "ezio" quando TODOS da coluna foram validados (ela ficou vazia) e ainda
+  // restou valor depois de validar todo mundo.
+  if (todosValidados && valorRestante > 0) {
+    const observacao = `Pagamento geral — excedente sobre a coluna "Já pago" (valor informado: R$ ${valorArred.toFixed(2)})`;
+    const res = adicionarPagamento(novo, {
+      usuarioId: ezio.id,
+      valor: valorRestante,
+      observacao,
+      perfil: 'admin',
+    });
+    if (!res.ok) return res;
+    return {
+      ...res,
+      sobra: valorRestante,
+      baseJaPago,
+      valorInformado: valorArred,
+      usuariosZerados: idsValidados.length,
+    };
+  }
+
+  return {
+    ok: true,
+    data: novo,
+    pagamento: null,
+    sobra: 0,
+    baseJaPago,
+    valorInformado: valorArred,
+    usuariosZerados: idsValidados.length,
+  };
 }
 
 // ---------- Relatório de pedidos em PDF ----------

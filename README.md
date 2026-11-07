@@ -811,43 +811,45 @@ descontando o que ele já pagou").
 
 No topo da aba Pendências, abaixo dos três cartões de resumo geral, o Admin
 tem um botão **"💰 Pagamento geral"** com um campo de valor ao lado. Serve
-pra lançar um valor recebido de uma vez (ex.: o caixa do dia) sem precisar
-lançar pagamento usuário por usuário — o Admin só digita o valor total
-recebido, e o sistema lança isso como um **pagamento comum** (ver "Registrar
-um pagamento" acima) para um usuário específico, cadastrado com o nome
-**"ezio"** (um usuário comum do catálogo de usuários — cadastrado como
-qualquer outro na aba "Usuários", **não** é uma conta de login). Se não
-existir um usuário chamado "ezio", a ação é rejeitada até que ele seja
-cadastrado.
+pra reconciliar um valor recebido de uma vez (ex.: o caixa do dia) com a
+coluna **"✓ Já pago"** (a segunda coluna da aba, com quem já está com o saldo
+quitado) — **não** com o cartão "Total já pago (geral)" do topo (esse soma
+também pagamentos parciais de quem ainda está pendente).
 
-**Importante:** a comparação NÃO usa o cartão "Total já pago (geral)" do
-topo (esse soma também pagamentos parciais de quem ainda está pendente) — usa
-a soma da coluna **"✓ Já pago"** (a segunda coluna da aba, com quem já está
-com o saldo quitado).
+**Como funciona:** o valor informado é usado pra **validar, um usuário de
+cada vez, na mesma ordem da coluna "✓ Já pago"** (do maior pro menor saldo).
+"Validar" um usuário significa **removê-lo por completo do sistema** — tanto
+o registro de pagamento quanto a pendência de origem (sem lançar nenhum outro
+pagamento pra ele), já que esse dinheiro já foi pago e recebido de verdade.
+Ele some de vez tanto de "✓ Já pago" quanto de "Pendentes" (não volta a
+aparecer devendo nada).
 
-O valor lançado pro "ezio" depende de como o valor informado se compara a
-essa soma:
-- Se o valor informado for **menor** que a soma da coluna "✓ Já pago" — o
-  valor informado **inteiro** é lançado como pagamento pro "ezio". Ex.: "✓ Já
-  pago" soma R$ 200 (um usuário, Beraht), Admin informa R$ 500 → lança
-  R$ 500 de pagamento pro "ezio".
-- Se o valor informado for **maior** que essa soma — só a **diferença**
-  (valor informado menos a soma da coluna "✓ Já pago") é lançada pro "ezio",
-  não o valor cheio. Ex.: "✓ Já pago" soma R$ 200, Admin informa R$ 500 →
-  sobra R$ 300 (500 − 200), lançado como pagamento de R$ 300 pro "ezio".
-- Se o valor informado for **exatamente igual** a essa soma, não há
-  excedente nenhum pra lançar e a ação é rejeitada.
+A validação tenta, um por um: se o que resta do valor informado cobrir o
+saldo daquele usuário, ele é validado e esse saldo é descontado do valor
+restante; se não cobrir, esse usuário fica como está (continua em "✓ Já
+pago", pagamento e pendência intactos) e a tentativa segue pros próximos da
+lista.
 
-Nos dois primeiros casos (ação executada), além de lançar o pagamento pro
-"ezio", a ação **remove por completo todo mundo que estava na coluna
-"✓ Já pago"** — tanto o registro de pagamento quanto a pendência de origem
-(sem lançar nenhum outro pagamento pra eles). Esse dinheiro já foi contado no
-valor informado e já foi recebido de verdade, então esses usuários **somem de
-vez tanto de "✓ Já pago" quanto de "Pendentes"** — não voltam a aparecer
-devendo nada.
+**Só quando TODOS os usuários da coluna "✓ Já pago" forem validados** (ela
+fica vazia) é que o que sobrar do valor informado vira um **pagamento
+comum** (ver "Registrar um pagamento" acima) pro usuário cadastrado com o
+nome **"ezio"** (um usuário comum do catálogo de usuários — cadastrado como
+qualquer outro na aba "Usuários", **não** é uma conta de login). Se faltar
+gente pra validar (o valor não cobre todo mundo da coluna), **nada é lançado
+pro "ezio" dessa vez** — o valor informado foi usado só pra validar quem
+coube. Se não existir um usuário chamado "ezio" e houver excedente possível
+(valor informado maior que a soma da coluna inteira), a ação é rejeitada até
+que ele seja cadastrado.
 
-Pede confirmação antes (mostrando o valor que será lançado) e não pode ser
-desfeito.
+Exemplo: "✓ Já pago" tem Beraht (R$ 200) e Fulano (R$ 50), soma R$ 250.
+- Admin informa **R$ 300** → os dois são validados (consomem R$ 250 no
+  total) e sobram **R$ 50**, lançados como pagamento pro "ezio".
+- Admin informa **R$ 220** → só o Beraht é validado (maior saldo primeiro,
+  R$ 200); sobram R$ 20, mas como o Fulano (R$ 50) não coube, **nada vai pro
+  "ezio"** dessa vez — numa próxima rodada (já sem o Beraht), esse valor
+  poderia validar o Fulano.
+
+Pede confirmação antes e não pode ser desfeito.
 
 ### Marcar uma pendência específica como recebida (exclusivo do Admin)
 
@@ -1128,6 +1130,26 @@ do Windows, e o app faz uma pequena migração automática na primeira vez que
 abrir (por exemplo, usuários antigos cadastrados sem telefone continuam
 aparecendo, só com o campo telefone em branco).
 
+### Desinstalar e apagar todos os dados (para reinstalar do zero)
+
+Se precisar remover o programa e **todos os dados salvos neste
+computador** — por exemplo pra reinstalar do zero, ou antes de repassar o
+computador pra outra pessoa — dê duplo clique em
+**`DESINSTALAR_E_LIMPAR_DADOS.bat`**. Ele:
+
+1. Fecha o Controle de Estoque, se estiver aberto.
+2. Abre o desinstalador oficial do Windows, se o programa estiver instalado
+   (remove o programa, atalhos e o registro dele do Windows).
+3. Apaga a pasta de dados local — itens, usuários, histórico, pendências e o
+   login do Admin — de forma que, ao instalar de novo, o app abra pedindo
+   pra criar o Admin, exatamente como na primeira vez.
+
+Pede uma confirmação digitada (`APAGAR`) antes de fazer qualquer coisa, já
+que o passo 3 **não pode ser desfeito**. Se quiser guardar os dados atuais,
+abra o programa antes, vá na aba "Backup" e exporte um arquivo
+`.estoquebkp` — esse script não mexe em backups que você já exportou, só na
+pasta de dados interna do app.
+
 ### Por que ainda existe uma etapa de `npm` nos bastidores
 
 O ambiente onde eu (Claude) construo esse projeto tem uma restrição de rede
@@ -1213,6 +1235,7 @@ python3 test/web-e2e.py   (navegador)
 GERAR_INSTALADOR.bat    duplo clique para gerar o instalador do Windows (sem prompt)
 TESTAR_SEM_INSTALAR.bat duplo clique para rodar o app direto, sem instalar
 PUBLICAR_NO_GITHUB.bat  duplo clique para enviar o código ao seu repositório no GitHub
+DESINSTALAR_E_LIMPAR_DADOS.bat  duplo clique para desinstalar e apagar todos os dados locais
 main.js                 app desktop: janela, diálogos nativos, PDF do Electron
 preload.js              ponte segura entre a interface e o processo principal (desktop)
 src/handlers.js         todas as ações da interface + permissões (desktop E web)

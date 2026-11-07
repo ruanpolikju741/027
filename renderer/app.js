@@ -128,8 +128,8 @@ function definirPreviewMidia(containerEl, dataUrl) {
   }
   containerEl.dataset.dataurl = dataUrl;
   containerEl.innerHTML = ehVideoDataUrl(dataUrl)
-    ? `<video src="${dataUrl}" controls></video>`
-    : `<img src="${dataUrl}" alt="Pré-visualização" />`;
+    ? `<video src="${escapeHtml(dataUrl)}" controls></video>`
+    : `<img src="${escapeHtml(dataUrl)}" alt="Pré-visualização" />`;
   containerEl.classList.remove('hidden');
 }
 
@@ -188,8 +188,8 @@ function formatarMoeda(valor) {
 function thumbMidiaHtml(url, chaveClique) {
   if (!url) return '—';
   return ehVideoDataUrl(url)
-    ? `<video class="thumb-historico" src="${url}" data-foto="${chaveClique}" muted preload="metadata"></video>`
-    : `<img class="thumb-historico" src="${url}" data-foto="${chaveClique}" />`;
+    ? `<video class="thumb-historico" src="${escapeHtml(url)}" data-foto="${chaveClique}" muted preload="metadata"></video>`
+    : `<img class="thumb-historico" src="${escapeHtml(url)}" data-foto="${chaveClique}" />`;
 }
 
 /** Redimensiona/comprime uma imagem no navegador antes de enviar para o backend. */
@@ -782,8 +782,8 @@ function cardHTML(item) {
   const isAdmin = state.perfil === 'admin';
   const fotoHtml = item.foto
     ? ehVideoDataUrl(item.foto)
-      ? `<video src="${item.foto}" muted preload="metadata"></video>`
-      : `<img src="${item.foto}" alt="${escapeHtml(item.nome)}" />`
+      ? `<video src="${escapeHtml(item.foto)}" muted preload="metadata"></video>`
+      : `<img src="${escapeHtml(item.foto)}" alt="${escapeHtml(item.nome)}" />`
     : `<span class="placeholder"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-2h6l2 2h3v11H4V8Z"/><circle cx="12" cy="13.5" r="3.2"/></svg></span>`;
   const usuariosOptions = state.usuarios
     .map(
@@ -2357,8 +2357,8 @@ function configurarModalConfirm() {
 function abrirLightbox(src) {
   const container = qs('#lightbox-img');
   container.innerHTML = ehVideoDataUrl(src)
-    ? `<video src="${src}" controls autoplay></video>`
-    : `<img src="${src}" alt="" />`;
+    ? `<video src="${escapeHtml(src)}" controls autoplay></video>`
+    : `<img src="${escapeHtml(src)}" alt="" />`;
   qs('#lightbox').classList.remove('hidden');
 }
 
@@ -3048,11 +3048,10 @@ function configurarPendencias() {
   });
 
   // "Pagamento geral" (exclusivo do Admin, ver `logic.registrarPagamentoGeral`): recebe um valor
-  // total (ex.: o caixa do dia), compara com a soma da coluna "✓ Já pago" (não com os cartões de
-  // resumo do topo) e lança como pagamento pro usuário "ezio" — o valor inteiro quando não cobre
-  // essa soma, ou só o excedente quando cobre e sobra. Nos dois casos, remove por completo quem
-  // estava em "✓ Já pago" (pagamento e pendência de origem — esse valor já entrou na conta aqui
-  // e já foi recebido de verdade).
+  // total (ex.: o caixa do dia) e VALIDA, um por um, na ordem da coluna "✓ Já pago" (maior pro
+  // menor saldo), quem esse valor conseguir cobrir — validado = removido por completo (pagamento
+  // e pendência de origem). Quem não couber fica como está. Só quando TODOS forem validados (a
+  // coluna fica vazia) é que o que sobrar vira pagamento pro usuário "ezio".
   const btnPagamentoGeral = qs('#btn-pendencias-pagamento-geral');
   if (btnPagamentoGeral) {
     btnPagamentoGeral.addEventListener('click', () => {
@@ -3065,11 +3064,11 @@ function configurarPendencias() {
       }
       abrirConfirm(
         'Pagamento geral',
-        `Lançar um pagamento geral de ${formatarMoeda(valor)}? Se esse valor não cobrir a soma da ` +
-          'coluna "✓ Já pago", ele é lançado inteiro pro usuário "ezio"; se cobrir e sobrar, só o ' +
-          'excedente é lançado. Nos dois casos, quem estava em "✓ Já pago" é removido por completo ' +
-          '(pagamento e pendência de origem) — esse dinheiro já foi recebido de verdade. Essa ação ' +
-          'não pode ser desfeita.',
+        `Lançar um pagamento geral de ${formatarMoeda(valor)}? Ele valida, um por um, na ordem da ` +
+          'coluna "✓ Já pago" (maior pro menor saldo), quem esse valor conseguir cobrir — validado é ' +
+          'removido por completo (pagamento e pendência de origem). Quem não couber fica como está. ' +
+          'Só quando TODOS forem validados (a coluna fica vazia) é que o que sobrar vira pagamento ' +
+          'pro usuário "ezio". Essa ação não pode ser desfeita.',
         async () => {
           const res = await window.api.pendencias.pagamentoGeral(valor);
           if (!res.ok) {
@@ -3079,8 +3078,10 @@ function configurarPendencias() {
           qs('#pendencias-pagamento-geral-valor').value = '';
           await atualizarTudoAposMudarPendencia();
           toast(
-            `Pagamento geral lançado — ${formatarMoeda(res.sobra)} abatido(s) da pendência do "ezio"` +
-              (res.usuariosZerados > 0 ? `, e ${res.usuariosZerados} usuário(s) removido(s) por completo (já quitados).` : '.')
+            (res.usuariosZerados > 0
+              ? `${res.usuariosZerados} usuário(s) validado(s) e removido(s) por completo de "✓ Já pago"`
+              : 'Nenhum usuário da coluna "✓ Já pago" coube nesse valor — nada foi alterado') +
+              (res.sobra > 0 ? `, e ${formatarMoeda(res.sobra)} sobrou(aram) pro "ezio".` : '.')
           );
         }
       );

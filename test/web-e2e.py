@@ -190,9 +190,9 @@ def main():
             assert not pendentes_depois, 'Beraht não deveria voltar a aparecer em "Pendentes" (já foi recebido)'
             passo('pagamento geral: compara com a coluna "✓ Já pago", lança o excedente pro "Ezio" e remove o Beraht por completo')
 
-            # Valor MENOR que a soma da coluna "✓ Já pago" — lança o valor informado INTEIRO pro
-            # "Ezio" (não rejeita, não calcula excedente nenhum). Pra isso, precisa de alguém de
-            # novo quitado (o Beraht saiu da coluna no passo anterior): "Fulano Geral" fica quitado com R$15.
+            # Valor MENOR que a soma da coluna "✓ Já pago" — valida só quem couber, na ordem (maior
+            # pro menor saldo), e NÃO lança nada pro "Ezio" dessa vez (a coluna não fica vazia).
+            # Dois quitados: "Fulano Geral" (R$15, maior) e "Fulaninho" (R$7,50, menor).
             setup_menor = pg.evaluate("""async () => {
                 const itens = await window.api.items.list();
                 const item = itens.find((i) => i.nome === 'Caixa de Água');
@@ -200,29 +200,40 @@ def main():
                 const r = await window.api.items.adjust({ itemId: item.id, tipo: 'saida', quantidade: 2,
                   usuarioId: fulano.usuario.id, tipoEntrega: 'retirada', pendente: true });
                 await window.api.pagamentos.adicionar(fulano.usuario.id, 15, 'Pagou tudo');
-                return { fulanoId: fulano.usuario.id, ok: r.ok };
+                const fulaninho = await window.api.usuarios.add('Fulaninho', '27900007777');
+                const r2 = await window.api.items.adjust({ itemId: item.id, tipo: 'saida', quantidade: 1,
+                  usuarioId: fulaninho.usuario.id, tipoEntrega: 'retirada', pendente: true });
+                await window.api.pagamentos.adicionar(fulaninho.usuario.id, 7.5, 'Pagou tudo');
+                return { fulanoId: fulano.usuario.id, fulaninhoId: fulaninho.usuario.id, ok: r.ok && r2.ok };
             }""")
             assert setup_menor['ok'], setup_menor
             fulano_id = setup_menor['fulanoId']
+            fulaninho_id = setup_menor['fulaninhoId']
             pg.evaluate('() => renderPendencias()')
             saldo_ezio_antes = pg.evaluate(
                 "(id) => window.api.pendencias.detalharUsuario(id).then(d => d.totalPendente)", ezio_id
             )
             assert saldo_ezio_antes == 2.5, saldo_ezio_antes
-            pg.fill('#pendencias-pagamento-geral-valor', '2')  # base = 15 (Fulano) → valor inteiro (menor)
+            # R$15 cobre só o "Fulano Geral" (maior), não cobre o "Fulaninho" (R$7,50) ao mesmo tempo.
+            pg.fill('#pendencias-pagamento-geral-valor', '15')
             pg.click('#btn-pendencias-pagamento-geral')
             pg.click('#confirm-ok')
             saldo_ezio_depois = pg.evaluate(
                 "(id) => window.api.pendencias.detalharUsuario(id).then(d => d.totalPendente)", ezio_id
             )
-            assert saldo_ezio_depois == 0.5, saldo_ezio_depois  # 2.5 - 2 (valor inteiro, sem excedente)
+            assert saldo_ezio_depois == 2.5, saldo_ezio_depois  # intocado — nada foi pro "Ezio"
             detalhe_fulano = pg.evaluate(
                 "(id) => window.api.pendencias.detalharUsuario(id)", fulano_id
             )
             assert detalhe_fulano['totalPagamentos'] == 0, detalhe_fulano
             assert detalhe_fulano['totalPendencias'] == 0, detalhe_fulano
-            assert detalhe_fulano['totalPendente'] == 0, detalhe_fulano  # removido por completo também
-            passo('pagamento geral: valor menor que a coluna "✓ Já pago" lança o valor inteiro pro "Ezio"')
+            assert detalhe_fulano['totalPendente'] == 0, detalhe_fulano  # validado (removido por completo)
+            detalhe_fulaninho = pg.evaluate(
+                "(id) => window.api.pendencias.detalharUsuario(id)", fulaninho_id
+            )
+            assert detalhe_fulaninho['totalPagamentos'] == 7.5, detalhe_fulaninho  # intocado
+            assert detalhe_fulaninho['totalPendente'] == 0, detalhe_fulaninho  # continua quitado
+            passo('pagamento geral: valor menor que a coluna "✓ Já pago" valida só quem couber e não lança nada pro "Ezio"')
 
             # Quantidade fracionária no catálogo (não só número inteiro).
             pg.click('.tab-btn[data-tab="catalogo"]')

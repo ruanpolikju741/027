@@ -235,18 +235,32 @@ const PNG_1x1 =
     assert.strictEqual(anonimo.status, 401);
   });
 
-  await t('foto "esquisita" (SVG, link externo, texto) nunca é gravada', async () => {
+  await t('foto "esquisita" (SVG, texto, tentativa de quebrar o atributo) nunca é gravada', async () => {
     const svg = 'data:image/svg+xml;base64,' + Buffer.from('<svg onload="alert(1)"/>').toString('base64');
     const r = await admin.rpc('items:add', { nome: 'SVG', quantidade: 1, foto: svg });
     assert.strictEqual(r.ok, false);
     assert.match(r.erro, /Formato/);
-    for (const foto of ['https://exemplo.com/x.png', '" onerror="alert(1)']) {
-      const r = await admin.rpc('items:add', { nome: 'Teste ' + foto.slice(0, 5), quantidade: 1, foto });
-      assert.strictEqual(r.ok, true);
-    }
+
+    // Uma URL http(s) bem formada é um formato válido de "foto" (ver `validarFoto` em
+    // src/logic.js) — mas a versão web só sabe servir mídia que ela mesma processou
+    // (`/api/midia/<hash>`), então um link externo passa da validação e, ao gravar, acaba
+    // descartado (vira null) pelo pipeline de mídia da web (ver `separarMidias` em
+    // web/repositorio.js) — nunca chega a aparecer como `src` pra ninguém.
+    const rUrl = await admin.rpc('items:add', { nome: 'Teste link', quantidade: 1, foto: 'https://exemplo.com/x.png' });
+    assert.strictEqual(rUrl.ok, true);
+
+    // Texto que não é nem data URL, nem URL http(s), nem a referência interna de mídia — inclusive
+    // uma tentativa de fechar o atributo `src` e injetar outro atributo — é recusado de cara, sem
+    // salvar nada (ver `validarFoto` em src/logic.js).
+    const rAtaque = await admin.rpc('items:add', { nome: 'Teste ataque', quantidade: 1, foto: '" onerror="alert(1)' });
+    assert.strictEqual(rAtaque.ok, false);
+    assert.match(rAtaque.erro, /[Ii]nválido/);
+
     const lista = await admin.rpc('items:list');
-    for (const i of lista.filter((x) => x.nome.startsWith('Teste'))) assert.strictEqual(i.foto, null);
-    for (const i of lista.filter((x) => x.nome.startsWith('Teste'))) await admin.rpc('items:remove', i.id);
+    const linkItem = lista.find((x) => x.nome === 'Teste link');
+    assert.strictEqual(linkItem.foto, null);
+    assert.strictEqual(lista.some((x) => x.nome === 'Teste ataque'), false);
+    await admin.rpc('items:remove', linkItem.id);
   });
 
   await t('vídeo grande demais pro plano grátis é recusado antes de gravar', async () => {

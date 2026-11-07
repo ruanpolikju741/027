@@ -304,6 +304,23 @@ t('verificarLogin: reconhece o admin, uma conta do Default (com o aviso de preci
   assert.strictEqual(logic.verificarLogin(data, 'ninguem', 'qualquer').ok, false);
 });
 
+t('verificarLogin: usuário inexistente e senha errada devolvem exatamente o mesmo erro genérico (correção do timing side-channel do login)', () => {
+  let data = logic.criarDadosIniciais();
+  data = logic.configurarLoginInicial(data, { usuario: 'admin', senha: 'senhadoadmin1' }).data;
+  data = logic.criarContaLogin(data, { usuario: 'joao', senha: 'senhaDoJoao1' }).data;
+
+  const senhaAdminErrada = logic.verificarLogin(data, 'admin', 'senhaErrada');
+  const senhaJoaoErrada = logic.verificarLogin(data, 'joao', 'senhaErrada');
+  const usuarioInexistente = logic.verificarLogin(data, 'ninguem', 'qualquer');
+
+  for (const r of [senhaAdminErrada, senhaJoaoErrada, usuarioInexistente]) {
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.erro, 'Usuário ou senha inválidos.');
+    // Nenhuma pista sobre qual foi o motivo (usuário não existe x senha errada).
+    assert.strictEqual(Object.keys(r).sort().join(','), 'erro,ok');
+  }
+});
+
 t('trocarSenhaContaLogin exige a senha atual correta e a nova com mínimo de 6 caracteres; rejeita conta inexistente', () => {
   let data = logic.criarDadosIniciais();
   data = logic.criarContaLogin(data, { usuario: 'joao', senha: 'temporaria1' }).data;
@@ -349,6 +366,40 @@ t('rejeita item sem nome', () => {
   const data = logic.criarDadosIniciais();
   const add = logic.adicionarItem(data, { nome: '   ', quantidade: 5 });
   assert.strictEqual(add.ok, false);
+});
+
+t('foto do item: aceita data URL de imagem/vídeo permitido, URL http(s) e a referência interna de mídia da web; rejeita o resto (correção da validação/escaping do campo "foto")', () => {
+  const data = logic.criarDadosIniciais();
+  const pngValido = 'data:image/png;base64,aGVsbG8=';
+  const mp4Valido = 'data:video/mp4;base64,aGVsbG8=';
+  const svgRecusado = 'data:image/svg+xml;base64,' + Buffer.from('<svg onload="alert(1)"/>').toString('base64');
+  const urlValida = 'https://exemplo.com/foto.png';
+  const referenciaInternaWeb = '/api/midia/' + '0'.repeat(64) + '?tipo=video';
+  const tentativaDeQuebrarAtributo = '" onerror="alert(1)';
+  const tagSolta = '<script>alert(1)</script>';
+
+  for (const foto of [pngValido, mp4Valido, urlValida, referenciaInternaWeb, null, undefined]) {
+    const add = logic.adicionarItem(data, { nome: 'Item ' + String(foto).slice(0, 8), foto });
+    assert.strictEqual(add.ok, true, 'deveria aceitar: ' + foto);
+  }
+
+  for (const foto of [svgRecusado, tentativaDeQuebrarAtributo, tagSolta, 'texto qualquer']) {
+    const add = logic.adicionarItem(data, { nome: 'Item recusado', foto });
+    assert.strictEqual(add.ok, false, 'deveria recusar: ' + foto);
+    assert.match(add.erro, /inválido/);
+  }
+
+  // editarItem aplica a mesma validação quando o campo "foto" é enviado.
+  const criado = logic.adicionarItem(data, { nome: 'Item pra editar', foto: pngValido });
+  const item = criado.item;
+  const editOk = logic.editarItem(criado.data, item.id, { foto: urlValida });
+  assert.strictEqual(editOk.ok, true);
+  const editRecusado = logic.editarItem(criado.data, item.id, { foto: tentativaDeQuebrarAtributo });
+  assert.strictEqual(editRecusado.ok, false);
+  // Editar sem mandar "foto" não valida nem altera a foto existente.
+  const editSemFoto = logic.editarItem(criado.data, item.id, { nome: 'Item renomeado' });
+  assert.strictEqual(editSemFoto.ok, true);
+  assert.strictEqual(editSemFoto.item.foto, pngValido);
 });
 
 console.log('== logic: usuários ==');
@@ -1648,6 +1699,26 @@ t('ajustarQuantidade grava precoUnitarioNaHora (foto do preço no momento da mov
   assert.strictEqual(saidaSemPreco.transacao.precoUnitarioNaHora, null);
 });
 
+t('ajustarQuantidade valida a foto da movimentação com a mesma whitelist dos itens (alcançável pelo perfil Default também)', () => {
+  const { data, itemId } = dataComItem(10);
+  const ru = logic.adicionarUsuario(data, { nome: 'Carla', telefone: '27988880000' });
+  const comUsuario = ru.data;
+
+  const ok = logic.ajustarQuantidade(comUsuario, {
+    itemId, tipo: 'saida', quantidade: 1, usuarioId: ru.usuario.id, tipoEntrega: 'retirada',
+    perfil: 'default', foto: 'data:image/jpeg;base64,aGVsbG8=',
+  });
+  assert.strictEqual(ok.ok, true);
+  assert.strictEqual(ok.transacao.foto, 'data:image/jpeg;base64,aGVsbG8=');
+
+  const recusado = logic.ajustarQuantidade(comUsuario, {
+    itemId, tipo: 'saida', quantidade: 1, usuarioId: ru.usuario.id, tipoEntrega: 'retirada',
+    perfil: 'default', foto: '" onerror="alert(1)',
+  });
+  assert.strictEqual(recusado.ok, false);
+  assert.match(recusado.erro, /inválido/);
+});
+
 t('pendência de item removido do catálogo mantém quantidade e valor (usa o último preço conhecido do item)', () => {
   let { data, itemId } = dataComItem(20);
   data = logic.definirPrecoItem(data, itemId, 10).data; // R$ 10/un
@@ -1943,43 +2014,64 @@ t('registrarPagamentoGeral: compara com a soma da coluna "✓ Já pago" (não co
   assert.strictEqual(logic.registrarPagamentoGeral(data, 'abc').ok, false);
 });
 
-t('registrarPagamentoGeral: valor MENOR que a soma da coluna "✓ Já pago" lança o valor informado inteiro pro "ezio" (não um excedente), e remove por completo quem estava quitado', () => {
+t('registrarPagamentoGeral: valor MENOR que a soma da coluna "✓ Já pago" valida só quem couber (maior saldo primeiro) e NÃO lança nada pro "ezio" — quem não coube fica como está', () => {
   let { data, itemId } = dataComItem(200);
   data = logic.definirPrecoItem(data, itemId, 10).data;
 
-  // Usuário A: quitado com R$500 (base da comparação).
-  const rA = logic.adicionarUsuario(data, { nome: 'Fulano', telefone: '27900000333' });
-  data = rA.data;
+  // Dois quitados: Beraht (R$200, maior) e Fulaninho (R$50, menor) — soma R$250.
+  const rBeraht = logic.adicionarUsuario(data, { nome: 'Beraht', telefone: '27900000111' });
+  data = rBeraht.data;
   data = logic.ajustarQuantidade(data, {
-    itemId, tipo: 'saida', quantidade: 50, usuarioId: rA.usuario.id, tipoEntrega: 'retirada', pendente: true, perfil: 'admin',
+    itemId, tipo: 'saida', quantidade: 20, usuarioId: rBeraht.usuario.id, tipoEntrega: 'retirada', pendente: true, perfil: 'admin',
   }).data;
-  data = logic.adicionarPagamento(data, { usuarioId: rA.usuario.id, valor: 500, observacao: 'Pagou tudo' }).data;
+  data = logic.adicionarPagamento(data, { usuarioId: rBeraht.usuario.id, valor: 200, observacao: 'Pagou tudo' }).data;
+
+  const rFulaninho = logic.adicionarUsuario(data, { nome: 'Fulaninho', telefone: '27900000666' });
+  data = rFulaninho.data;
+  data = logic.ajustarQuantidade(data, {
+    itemId, tipo: 'saida', quantidade: 5, usuarioId: rFulaninho.usuario.id, tipoEntrega: 'retirada', pendente: true, perfil: 'admin',
+  }).data;
+  data = logic.adicionarPagamento(data, { usuarioId: rFulaninho.usuario.id, valor: 50, observacao: 'Pagou tudo' }).data;
+
+  // Ordem da coluna "✓ Já pago": maior pro menor saldo (Beraht 200, depois Fulaninho 50).
+  const quitadosOrdem = logic.listarUsuariosQuitados(data);
+  assert.deepStrictEqual(quitadosOrdem.map((u) => u.usuarioId), [rBeraht.usuario.id, rFulaninho.usuario.id]);
 
   const rEzio = logic.adicionarUsuario(data, { nome: 'ezio', telefone: '27900000444' });
   data = rEzio.data;
   data = logic.ajustarQuantidade(data, {
     itemId, tipo: 'saida', quantidade: 100, usuarioId: rEzio.usuario.id, tipoEntrega: 'retirada', pendente: true, perfil: 'admin',
   }).data;
+  const ezioPendenteAntes = logic.detalharPendenciasUsuario(data, rEzio.usuario.id).totalPendente;
 
-  const res = logic.registrarPagamentoGeral(data, 300); // 300 < 500
+  // R$220: cobre o Beraht (200) mas não o Fulaninho (50, já que só sobram 20) — só o Beraht é
+  // validado; como a coluna NÃO fica vazia, nada é lançado pro "ezio" dessa vez.
+  const res = logic.registrarPagamentoGeral(data, 220);
   assert.strictEqual(res.ok, true);
-  assert.strictEqual(res.baseJaPago, 500);
-  assert.strictEqual(res.sobra, 300); // valor informado inteiro, não um excedente
-  assert.strictEqual(res.usuariosZerados, 1);
-  assert.strictEqual(res.pagamento.valor, 300);
+  assert.strictEqual(res.baseJaPago, 250);
+  assert.strictEqual(res.sobra, 0); // nada pro ezio — Fulaninho não coube
+  assert.strictEqual(res.usuariosZerados, 1); // só o Beraht
+  assert.strictEqual(res.pagamento, null);
   data = res.data;
 
-  assert.strictEqual(logic.detalharPendenciasUsuario(data, rEzio.usuario.id).totalPendente, 700);
-  // "Fulano" some por completo (pagamento removido E pendência de origem resolvida).
-  const a = logic.detalharPendenciasUsuario(data, rA.usuario.id);
-  assert.strictEqual(a.totalPagamentos, 0);
-  assert.strictEqual(a.totalPendencias, 0);
-  assert.strictEqual(a.totalPendente, 0);
-  assert.ok(!logic.listarUsuariosQuitados(data).some((u) => u.usuarioId === rA.usuario.id));
-  assert.ok(!logic.listarUsuariosPendentes(data).some((u) => u.usuarioId === rA.usuario.id));
+  // Pendência do "ezio" não muda — nada foi lançado pra ele.
+  assert.strictEqual(logic.detalharPendenciasUsuario(data, rEzio.usuario.id).totalPendente, ezioPendenteAntes);
+
+  // Beraht foi validado (removido por completo).
+  const beraht = logic.detalharPendenciasUsuario(data, rBeraht.usuario.id);
+  assert.strictEqual(beraht.totalPagamentos, 0);
+  assert.strictEqual(beraht.totalPendencias, 0);
+  assert.strictEqual(beraht.totalPendente, 0);
+  assert.ok(!logic.listarUsuariosQuitados(data).some((u) => u.usuarioId === rBeraht.usuario.id));
+
+  // Fulaninho NÃO foi tocado — continua exatamente como estava, quitado.
+  const fulaninho = logic.detalharPendenciasUsuario(data, rFulaninho.usuario.id);
+  assert.strictEqual(fulaninho.totalPagamentos, 50);
+  assert.strictEqual(fulaninho.totalPendente, 0);
+  assert.ok(logic.listarUsuariosQuitados(data).some((u) => u.usuarioId === rFulaninho.usuario.id));
 });
 
-t('registrarPagamentoGeral: rejeita quando o valor informado é exatamente igual à soma da coluna "✓ Já pago" (sem excedente) e não altera nada', () => {
+t('registrarPagamentoGeral: quando o valor cobre TODOS da coluna "✓ Já pago", valida todo mundo e manda o excedente pro "ezio" (exatamente igual à soma → valida todo mundo, nada sobra pro "ezio")', () => {
   let { data, itemId } = dataComItem(100);
   data = logic.definirPrecoItem(data, itemId, 10).data;
 
@@ -1990,12 +2082,21 @@ t('registrarPagamentoGeral: rejeita quando o valor informado é exatamente igual
   }).data;
   data = logic.adicionarPagamento(data, { usuarioId: rB.usuario.id, valor: 150, observacao: 'Pagou tudo' }).data;
 
+  // Valor EXATAMENTE igual à soma (150): valida o único quitado, mas não sobra nada — não precisa
+  // nem de "ezio" cadastrado pra isso (só exigido quando há excedente de verdade).
   const res = logic.registrarPagamentoGeral(data, 150);
-  assert.strictEqual(res.ok, false);
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(res.baseJaPago, 150);
+  assert.strictEqual(res.sobra, 0);
+  assert.strictEqual(res.usuariosZerados, 1);
+  assert.strictEqual(res.pagamento, null);
+  data = res.data;
 
-  // Nada foi alterado: o pagamento do usuário continua lá, ele continua quitado.
-  assert.strictEqual(logic.detalharPendenciasUsuario(data, rB.usuario.id).totalPagamentos, 150);
-  assert.ok(logic.listarUsuariosQuitados(data).some((u) => u.usuarioId === rB.usuario.id));
+  // O usuário foi validado (removido por completo) mesmo sem excedente nenhum.
+  const b = logic.detalharPendenciasUsuario(data, rB.usuario.id);
+  assert.strictEqual(b.totalPagamentos, 0);
+  assert.strictEqual(b.totalPendente, 0);
+  assert.ok(!logic.listarUsuariosQuitados(data).some((u) => u.usuarioId === rB.usuario.id));
 });
 
 t('registrarPagamentoGeral: rejeita quando não existe usuário "ezio" cadastrado', () => {

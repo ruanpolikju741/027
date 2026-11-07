@@ -217,6 +217,39 @@ const arq = (nome) => path.join(stub.pastaUserData, nome);
   assert.strictEqual(menorGeral.baseJaPago, 0);
   assert.strictEqual(menorGeral.usuariosZerados, 0);
 
+  // Validação PARCIAL: dois quitados (Beraht R$30 maior, Fulaninho R$10 menor) e um valor que só
+  // cobre o maior — só ele é validado, e nada vai pro "ezio" dessa vez (a coluna não ficou vazia).
+  const rBeraht = await chamar('usuarios:add', { nome: 'Beraht', telefone: '27900007777' });
+  assert.strictEqual(rBeraht.ok, true);
+  await chamar('items:adjust', {
+    itemId, tipo: 'saida', quantidade: 3, usuarioId: rBeraht.usuario.id, tipoEntrega: 'retirada', pendente: true,
+  });
+  const berahtAntes = await chamar('pendencias:detalharUsuario', rBeraht.usuario.id);
+  assert.strictEqual((await chamar('pagamentos:adicionar', { usuarioId: rBeraht.usuario.id, valor: berahtAntes.totalPendente, observacao: 'Pagou tudo' })).ok, true);
+
+  const rFulaninho = await chamar('usuarios:add', { nome: 'Fulaninho', telefone: '27900006666' });
+  assert.strictEqual(rFulaninho.ok, true);
+  await chamar('items:adjust', {
+    itemId, tipo: 'saida', quantidade: 1, usuarioId: rFulaninho.usuario.id, tipoEntrega: 'retirada', pendente: true,
+  });
+  const fulaninhoAntes = await chamar('pendencias:detalharUsuario', rFulaninho.usuario.id);
+  assert.strictEqual((await chamar('pagamentos:adicionar', { usuarioId: rFulaninho.usuario.id, valor: fulaninhoAntes.totalPendente, observacao: 'Pagou tudo' })).ok, true);
+
+  const quitadosOrdemParcial = await chamar('pendencias:listarQuitados');
+  assert.ok(quitadosOrdemParcial[0].totalPago > quitadosOrdemParcial[1].totalPago); // maior primeiro
+  const ezioAntesParcial = await chamar('pendencias:detalharUsuario', rEzio.usuario.id);
+
+  const parcial = await chamar('pendencias:pagamentoGeral', { valor: quitadosOrdemParcial[0].totalPago });
+  assert.strictEqual(parcial.ok, true);
+  assert.strictEqual(parcial.sobra, 0); // nada pro ezio — Fulaninho não coube
+  assert.strictEqual(parcial.usuariosZerados, 1); // só o maior
+  assert.strictEqual(parcial.pagamento, null);
+  const ezioDepoisParcial = await chamar('pendencias:detalharUsuario', rEzio.usuario.id);
+  assert.strictEqual(ezioDepoisParcial.totalPendente, ezioAntesParcial.totalPendente); // intocado
+
+  assert.ok(!(await chamar('pendencias:listarQuitados')).some((u) => u.usuarioId === rBeraht.usuario.id)); // validado
+  assert.ok((await chamar('pendencias:listarQuitados')).some((u) => u.usuarioId === rFulaninho.usuario.id)); // intocado
+
   // Importação total: zera o Admin, desloga e não reabre o primeiro acesso.
   stub.proximoAbrir = arq('b.estoquebkp');
   const imp = await chamar('backup:importar', { senha: 'bkp1234', modo: 'total' });

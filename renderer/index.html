@@ -253,12 +253,12 @@
 
         <div class="pendencias-geral-pagamento admin-only hidden" id="pendencias-geral-pagamento-wrap">
           <p class="dica-pequena">
-            Informe o valor total recebido (ex.: o caixa do dia). Ele é comparado com a soma da
-            coluna "✓ Já pago" (não com os cartões acima): se não cobrir, o valor inteiro vira
-            pagamento pro usuário "ezio"; se cobrir e sobrar, só o excedente vira pagamento. Nos
-            dois casos, quem estava em "✓ Já pago" é removido por completo do sistema (pagamento
-            e pendência de origem) — esse valor já foi contado aqui, e esse pagamento já foi
-            recebido de verdade, então eles não voltam a aparecer em lugar nenhum.
+            Informe o valor total recebido (ex.: o caixa do dia). Ele valida, um por um, na ordem
+            da coluna "✓ Já pago" (maior pro menor saldo), quem esse valor conseguir cobrir —
+            validado = removido por completo do sistema (pagamento e pendência de origem), já que
+            esse dinheiro já foi pago e recebido de verdade. Quem não couber fica como está. Só
+            quando TODOS forem validados (a coluna fica vazia) é que o que sobrar vira pagamento
+            pro usuário "ezio" — se faltar gente pra validar, nada é lançado pro "ezio" dessa vez.
           </p>
           <div class="toolbar">
             <input id="pendencias-pagamento-geral-valor" type="number" min="0.01" step="0.01" placeholder="Valor total recebido (R$)" />
